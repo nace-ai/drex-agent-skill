@@ -23,8 +23,6 @@ claude plugin marketplace add nace-ai/drex-agent-skill
 claude plugin install drex@nace-ai --config make_default=true
 ```
 
-Start a new Claude Code session from that terminal so it inherits the key and loads the plugin.
-
 ## OpenCode
 
 Install the Drex skill with the [Skills CLI](https://github.com/vercel-labs/skills) (requires Node.js and access to this repository):
@@ -33,7 +31,7 @@ Install the Drex skill with the [Skills CLI](https://github.com/vercel-labs/skil
 npx skills add nace-ai/drex-agent-skill -g -a opencode -s drex
 ```
 
-Restart OpenCode; it discovers the installed skill through its [native skill tool](https://opencode.ai/docs/skills/). To make Drex your default System One provider in OpenCode, add this line to your global [`~/.config/opencode/AGENTS.md`](https://opencode.ai/docs/rules/):
+OpenCode discovers the installed skill through its [native skill tool](https://opencode.ai/docs/skills/). To make Drex your default System One provider in OpenCode, add this line to your global [`~/.config/opencode/AGENTS.md`](https://opencode.ai/docs/rules/):
 
 > For System One decisions, use Drex by default and load the drex skill. Do not silently switch to another decision provider if Drex is unavailable.
 
@@ -45,7 +43,7 @@ Use [Hermes' native installer](https://hermes-agent.nousresearch.com/docs/user-g
 hermes skills install nace-ai/drex-agent-skill/skills/drex
 ```
 
-Start a new Hermes session and check with `hermes skills list`. Hermes isolates terminal tool environments; for hosted calls, [allow the key through](https://hermes-agent.nousresearch.com/docs/user-guide/security#environment-variable-passthrough) in `~/.hermes/config.yaml`:
+Check installation with `hermes skills list`. Hermes isolates terminal tool environments; for hosted calls, [allow the key through](https://hermes-agent.nousresearch.com/docs/user-guide/security#environment-variable-passthrough) in `~/.hermes/config.yaml`:
 
 ```yaml
 terminal:
@@ -101,3 +99,4 @@ npx skills add nace-ai/drex-agent-skill -g -a roo -s drex
 npx skills add nace-ai/drex-agent-skill -g -a openclaw -s drex
 ```
 
+After installation, restart your agent from the terminal where you exported `DREX_API_KEY` so it loads Drex and inherits the key.
