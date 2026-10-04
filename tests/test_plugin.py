@@ -117,7 +117,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn("## Design the questions", skill)
         self.assertIn("## Call Drex", skill)
         readme = (ROOT / "README.md").read_text()
-        self.assertTrue(readme.startswith("# Make Drex the default System One model\n"))
+        self.assertTrue(readme.startswith("# Drex for coding agents\n"))
         self.assertIn("drex.nace.ai/login", readme)
         self.assertIn("export DREX_API_KEY='paste-your-key-here'", readme)
         self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skill", readme)

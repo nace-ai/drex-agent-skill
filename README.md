@@ -1,4 +1,4 @@
-# Make Drex the default System One model
+# Drex for coding agents
 
 Get a Drex API key, export it once, then install the plugin or skill for the harness you use. Drex handles System One decisions without changing your coding model.
 
