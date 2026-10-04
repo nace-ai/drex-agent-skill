@@ -16,8 +16,6 @@ Run your agent from that terminal so it inherits the key. You need GitHub access
 
 ## Install Drex for your agent
 
-Choose your agent below and follow its instructions. Sections that need a local checkout include the clone command; if you already have a checkout, skip that command and use your checkout path instead. Keep a checkout in place for any skill-directory links. For an agent not listed here, see [Other harness](#other-harness). A standalone skill does not set a default decision provider; use the linked agent documentation for project-scoped installation.
-
 ### Claude Code
 
 Use the [native plugin installer](https://code.claude.com/docs/en/plugins/install) to make Drex the default System One model:
@@ -31,7 +29,7 @@ Restart Claude Code after installation to load Drex.
 
 ### OpenCode
 
-[OpenCode discovers skills](https://opencode.ai/docs/skills/) under `~/.config/opencode/skills/`. Clone the repository, then link the complete skill directory:
+[OpenCode discovers skills](https://opencode.ai/docs/skills/) under `~/.config/opencode/skills/`:
 
 ```bash
 git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"
@@ -47,7 +45,7 @@ Restart OpenCode after installation to load Drex.
 
 ### Hermes Agent
 
-Use [Hermes' native installer](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills). For this GitHub repository, [configure `GITHUB_TOKEN` for Hermes](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) if it needs access to the private source; do not put the token in the skill file:
+Use [Hermes' native installer](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills):
 
 ```bash
 hermes skills install nace-ai/drex-agent-skill/skills/drex
@@ -66,19 +64,17 @@ Restart Hermes after installation to load Drex and apply credential passthrough.
 
 ### Codex
 
-Use Codex's [built-in `$skill-installer`](https://developers.openai.com/codex/skills) in a Codex session; ask it to install the Drex skill from its GitHub directory (with access to the repository):
+Use Codex's [built-in `$skill-installer`](https://developers.openai.com/codex/skills) in a Codex session; ask it to install the Drex skill from its GitHub directory:
 
 ```text
 $skill-installer Install https://github.com/nace-ai/drex-agent-skill/tree/main/skills/drex
 ```
 
-For a project-local skill instead, link `skills/drex` from an authenticated checkout into that project's `.agents/skills/drex/`. The built-in installer installs only the skill directory, not the repository-level helper script.
-
 Restart Codex after installation to load Drex.
 
 ### Cursor
 
-[Cursor discovers personal skills](https://cursor.com/docs/skills) under `~/.cursor/skills/`. Clone the repository, then link the complete skill directory:
+[Cursor discovers personal skills](https://cursor.com/docs/skills) under `~/.cursor/skills/`:
 
 ```bash
 git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"
@@ -86,13 +82,13 @@ mkdir -p ~/.cursor/skills
 ln -s "$HOME/drex-agent-skill/skills/drex" ~/.cursor/skills/drex
 ```
 
-For Cursor Cloud Agents, put the skill in the repository's `.cursor/skills/drex/`, or enable Cursor's Skills Sync for personal skills; unsynced local skills are unavailable to cloud agents.
+For Cursor Cloud Agents, put the skill in the repository's `.cursor/skills/drex/`, or enable Cursor's Skills Sync for personal skills.
 
 Restart Cursor after installation to load Drex. Configure `DREX_API_KEY` in the cloud agent's environment if using Cursor Cloud Agents.
 
 ### Gemini CLI
 
-Use [Gemini CLI's native Git installer](https://geminicli.com/docs/cli/skills/) with the path to the skill inside the repository (requires Git access):
+Use [Gemini CLI's native Git installer](https://geminicli.com/docs/cli/skills/) with the path to the skill inside the repository:
 
 ```bash
 gemini skills install https://github.com/nace-ai/drex-agent-skill.git --path skills/drex
@@ -111,13 +107,13 @@ copilot skill add "$HOME/drex-agent-skill/skills/drex"
 copilot skill list
 ```
 
-Keep that clone in place: registering a directory does not copy its files. For Copilot coding or review agents on GitHub, put the skill in the target repository's `.github/skills/drex/` instead; a local personal skill is not available to a cloud agent. GitHub CLI also offers [`gh skill install`](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills) for discoverable repository skills, but the command above does not depend on remote skill discovery for this nested private repository.
+For Copilot coding or review agents on GitHub, put the skill in the target repository's `.github/skills/drex/` instead. GitHub CLI also offers [`gh skill install`](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills) for discoverable repository skills.
 
 Restart Copilot CLI after installation to load Drex. Configure `DREX_API_KEY` in the cloud agent's environment if using Copilot coding or review agents on GitHub.
 
 ### Windsurf
 
-[Windsurf discovers global skills](https://docs.devin.ai/desktop/cascade/skills) under `~/.codeium/windsurf/skills/`. Clone the repository, then link the complete skill directory:
+[Windsurf discovers global skills](https://docs.devin.ai/desktop/cascade/skills) under `~/.codeium/windsurf/skills/`:
 
 ```bash
 git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"
@@ -129,7 +125,7 @@ Restart Windsurf after installation to load Drex.
 
 ### Cline
 
-[Cline discovers global skills](https://docs.cline.bot/customization/skills) under `~/.cline/skills/`. Clone the repository, then link the complete skill directory:
+[Cline discovers global skills](https://docs.cline.bot/customization/skills) under `~/.cline/skills/`:
 
 ```bash
 git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"
@@ -141,7 +137,7 @@ Restart Cline after installation to load Drex.
 
 ### OpenClaw
 
-[OpenClaw's native installer](https://docs.openclaw.ai/cli/skills) accepts a local skill directory containing `SKILL.md`. Clone the repository to provide that directory:
+[OpenClaw's native installer](https://docs.openclaw.ai/cli/skills) accepts a local skill directory containing `SKILL.md`:
 
 ```bash
 git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"
@@ -152,7 +148,7 @@ Restart OpenClaw after installation to load Drex.
 
 ### Pi
 
-Use Pi's [native Git package installer](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/packages.md) (requires Git access). Pi discovers the repository's `skills/drex/SKILL.md` through its standard `skills/` package directory:
+Use Pi's [native Git package installer](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/packages.md):
 
 ```bash
 pi install git:github.com/nace-ai/drex-agent-skill
@@ -165,7 +161,7 @@ Restart Pi after installation to load Drex.
 
 ### DeepSeek Harness
 
-[DeepSeek Harness discovers personal skills](https://deepseek-harness.github.io/deepseek-harness/en/reference/subsystems/skills) under `${DSH_HOME:-$HOME/.dsh}/skills/` and project skills under `.dsh/skills/`. Clone the repository, then link the complete skill directory:
+[DeepSeek Harness discovers personal skills](https://deepseek-harness.github.io/deepseek-harness/en/reference/subsystems/skills) under `${DSH_HOME:-$HOME/.dsh}/skills/` and project skills under `.dsh/skills/`:
 
 ```bash
 git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"
