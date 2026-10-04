@@ -1,12 +1,20 @@
 {
   "name": "drex",
-  "version": "0.1.0",
-  "description": "Agent skill for writing software that calls the Drex decision API.",
+  "version": "0.4.0",
+  "description": "Use Drex for System One decisions, with an install-time option to make it the default decision model.",
   "author": {
     "name": "Nace AI",
     "url": "https://www.nace.ai"
   },
   "homepage": "https://drex.nace.ai/docs",
   "repository": "https://github.com/nace-ai/drex-agent-skill",
-  "license": "MIT"
+  "license": "MIT",
+  "userConfig": {
+    "make_default": {
+      "type": "boolean",
+      "title": "Make Drex the default System One model",
+      "description": "Use Drex instead of other decision-model skills for System One judgments. Leaves your chat model unchanged. When off, add Drex capability without changing provider preferences.",
+      "default": false
+    }
+  }
 }
