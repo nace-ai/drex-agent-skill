@@ -59,15 +59,11 @@ terminal:
 npx skills add nace-ai/drex-agent-skill -g -a codex -s drex
 ```
 
-Agent id: `codex`. Restart Codex after installation.
-
 ## Cursor
 
 ```bash
 npx skills add nace-ai/drex-agent-skill -g -a cursor -s drex
 ```
-
-Agent id: `cursor`. Restart Cursor after installation.
 
 ## Gemini CLI
 
@@ -75,15 +71,11 @@ Agent id: `cursor`. Restart Cursor after installation.
 npx skills add nace-ai/drex-agent-skill -g -a gemini-cli -s drex
 ```
 
-Agent id: `gemini-cli`. Restart Gemini CLI after installation.
-
 ## GitHub Copilot
 
 ```bash
 npx skills add nace-ai/drex-agent-skill -g -a github-copilot -s drex
 ```
-
-Agent id: `github-copilot`. Restart GitHub Copilot after installation.
 
 ## Windsurf
 
@@ -91,15 +83,11 @@ Agent id: `github-copilot`. Restart GitHub Copilot after installation.
 npx skills add nace-ai/drex-agent-skill -g -a windsurf -s drex
 ```
 
-Agent id: `windsurf`. Restart Windsurf after installation.
-
 ## Cline
 
 ```bash
 npx skills add nace-ai/drex-agent-skill -g -a cline -s drex
 ```
-
-Agent id: `cline`. Restart Cline after installation.
 
 ## Roo Code
 
@@ -107,12 +95,9 @@ Agent id: `cline`. Restart Cline after installation.
 npx skills add nace-ai/drex-agent-skill -g -a roo -s drex
 ```
 
-Agent id: `roo`. Restart Roo Code after installation.
-
 ## OpenClaw
 
 ```bash
 npx skills add nace-ai/drex-agent-skill -g -a openclaw -s drex
 ```
 
-Agent id: `openclaw`. Restart OpenClaw after installation.
