@@ -14,8 +14,6 @@ The export is the shared step. Each heading after it is one supported harness, i
    export DREX_API_KEY='paste-your-key-here'
    ```
 
-Your key stays in that terminal session; set it again in a new terminal. Keep the key out of chats and committed files. Start the harness from that terminal so the process inherits the key.
-
 ## Claude Code
 
 Install the plugin with Drex as the default. Run these in the same terminal where you exported the key:
@@ -35,15 +33,13 @@ Install the Drex skill with the [Skills CLI](https://github.com/vercel-labs/skil
 npx skills add nace-ai/drex-agent-skill -g -a opencode -s drex
 ```
 
-No manual Git checkout is needed. Restart OpenCode; it discovers the installed skill through its [native skill tool](https://opencode.ai/docs/skills/). To make Drex your default System One provider in OpenCode, add this line to your global [`~/.config/opencode/AGENTS.md`](https://opencode.ai/docs/rules/):
+Restart OpenCode; it discovers the installed skill through its [native skill tool](https://opencode.ai/docs/skills/). To make Drex your default System One provider in OpenCode, add this line to your global [`~/.config/opencode/AGENTS.md`](https://opencode.ai/docs/rules/):
 
 > For System One decisions, use Drex by default and load the drex skill. Do not silently switch to another decision provider if Drex is unavailable.
 
-The Claude Code `make_default=true` flag does not configure OpenCode.
-
 ## Hermes Agent
 
-Use [Hermes' native installer](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) to install directly from the GitHub skill path (repository access required):
+Use [Hermes' native installer](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills):
 
 ```bash
 hermes skills install nace-ai/drex-agent-skill/skills/drex
@@ -56,8 +52,6 @@ terminal:
   env_passthrough:
     - DREX_API_KEY
 ```
-
-Launch Hermes from the terminal where you exported the key. Do not paste it into chat. Installing the skill does not automatically change Hermes' default decision-provider preference. The Skills CLI alternative uses agent id `hermes-agent`.
 
 ## Codex
 
@@ -122,5 +116,3 @@ npx skills add nace-ai/drex-agent-skill -g -a openclaw -s drex
 ```
 
 Agent id: `openclaw`. Restart OpenClaw after installation.
-
-A skill install provides Drex capability, not a universal `make_default` flag; set a preference in that harness's native persistent instructions if you want one. Hosted calls use the shared export above. Hermes' isolated tools still need the passthrough in the Hermes Agent section.
