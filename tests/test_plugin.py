@@ -123,12 +123,15 @@ class PluginTests(unittest.TestCase):
         self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skill", readme)
         self.assertIn("claude plugin install drex@nace-ai --config make_default=true", readme)
         clone = 'git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"'
-        for agent in ("OpenCode", "Cursor", "GitHub Copilot", "Windsurf", "Cline", "OpenClaw", "DeepSeek Harness", "Other harness"):
-            section = readme.split(f"### {agent}\n", 1)[1].split("\n### ", 1)[0].split("\n## Restart", 1)[0]
-            self.assertIn(clone, section, agent)
-        for agent in ("Claude Code", "Hermes Agent", "Codex", "Gemini CLI", "Pi"):
+        local_agents = ("OpenCode", "Cursor", "GitHub Copilot", "Windsurf", "Cline", "OpenClaw", "DeepSeek Harness", "Other harness")
+        native_agents = ("Claude Code", "Hermes Agent", "Codex", "Gemini CLI", "Pi")
+        for agent in (*local_agents, *native_agents):
             section = readme.split(f"### {agent}\n", 1)[1].split("\n### ", 1)[0]
-            self.assertNotIn(clone, section, agent)
+            if agent in local_agents:
+                self.assertIn(clone, section, agent)
+            else:
+                self.assertNotIn(clone, section, agent)
+            self.assertRegex(section, r"Restart .+ after installation to load Drex", agent)
         self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex" ~/.config/opencode/skills/drex', readme)
         self.assertIn("~/.config/opencode/AGENTS.md", readme)
         self.assertIn("hermes skills install nace-ai/drex-agent-skill/skills/drex", readme)
@@ -149,11 +152,8 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("npx skills add", readme)
         self.assertIn("## Install Drex for your agent\n", readme)
         self.assertIn("### Other harness\n", readme)
-        self.assertIn("## Restart your agent\n", readme)
+        self.assertNotIn("## Restart your agent\n", readme)
         self.assertLess(readme.index("### DeepSeek Harness\n"), readme.index("### Other harness\n"))
-        self.assertLess(readme.index("### Other harness\n"), readme.index("## Restart your agent\n"))
-        self.assertIn("After installation, restart your agent", readme)
-        self.assertIn("all agents above", readme)
         self.assertNotIn("--config make_default=false", readme)
         self.assertNotIn("python", readme.lower())
         self.assertNotIn("/drex:", readme)
