@@ -125,6 +125,10 @@ class PluginTests(unittest.TestCase):
         self.assertIn("npx skills add nace-ai/drex-agent-skill -g -a opencode -s drex", readme)
         self.assertIn("~/.config/opencode/AGENTS.md", readme)
         self.assertIn("npx skills add nace-ai/drex-agent-skill -g -a codex -s drex", readme)
+        self.assertIn("hermes skills install nace-ai/drex-agent-skill/skills/drex", readme)
+        self.assertIn("env_passthrough:\n    - DREX_API_KEY", readme)
+        for agent in ("gemini-cli", "github-copilot", "windsurf", "cline", "roo", "openclaw", "hermes-agent"):
+            self.assertIn(f"`{agent}`", readme)
         self.assertNotIn("--config make_default=false", readme)
         self.assertNotIn("python", readme.lower())
         self.assertNotIn("/drex:", readme)

@@ -6,9 +6,9 @@ description: >
   Helps design and call typed choice, noul, and score judgments for routing,
   classification, ranking, extraction checks, guardrails, and verification.
   Use when designing semantic decision steps, replacing prompt-and-JSON logic,
-  or integrating a hosted or self-hosted decision model. Honors the installed
-  make_default preference when selecting a System One provider. Load this
-  skill automatically when relevant; the user does not need to invoke it.
+  or integrating a hosted or self-hosted decision model. In Claude Code,
+  honors the plugin's make_default setting; in other agents, follows explicit
+  native provider preferences. Load this skill when relevant.
 ---
 
 # Build and decide with Drex
