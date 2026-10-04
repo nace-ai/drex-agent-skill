@@ -122,7 +122,13 @@ class PluginTests(unittest.TestCase):
         self.assertIn("export DREX_API_KEY='paste-your-key-here'", readme)
         self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skill", readme)
         self.assertIn("claude plugin install drex@nace-ai --config make_default=true", readme)
-        self.assertIn('git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"', readme)
+        clone = 'git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"'
+        for agent in ("OpenCode", "Cursor", "GitHub Copilot", "Windsurf", "Cline", "OpenClaw", "DeepSeek Harness", "Other harness"):
+            section = readme.split(f"### {agent}\n", 1)[1].split("\n### ", 1)[0].split("\n## Restart", 1)[0]
+            self.assertIn(clone, section, agent)
+        for agent in ("Claude Code", "Hermes Agent", "Codex", "Gemini CLI", "Pi"):
+            section = readme.split(f"### {agent}\n", 1)[1].split("\n### ", 1)[0]
+            self.assertNotIn(clone, section, agent)
         self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex" ~/.config/opencode/skills/drex', readme)
         self.assertIn("~/.config/opencode/AGENTS.md", readme)
         self.assertIn("hermes skills install nace-ai/drex-agent-skill/skills/drex", readme)
