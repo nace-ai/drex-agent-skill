@@ -12,7 +12,7 @@ Get a Drex API key, export it once, then install the plugin or skill for your ag
    export DREX_API_KEY='paste-your-key-here'
    ```
 
-Run your agent from that terminal so it inherits the key. You need GitHub access to the Drex repository. Use the agent's own installer where possible; no third-party skill installer is needed.
+Run your agent from that terminal so it inherits the key.
 
 ## Install Drex for your agent
 
