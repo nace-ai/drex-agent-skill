@@ -184,3 +184,17 @@ ln -s "$HOME/drex-agent-skill/skills/drex" "/path/to/your-agent/skills/drex"
 Replace `/path/to/your-agent/skills` with the actual directory from your agent's documentation; keep the checkout in place. If the agent does not support skills, follow its instructions for loading custom agent instructions instead; a skill-directory link alone will not activate Drex.
 
 Restart your agent after installation to load Drex. For cloud agents, configure `DREX_API_KEY` in the agent's supported environment or secrets settings.
+
+## Self-hosted Drex
+
+To run the open-source [Drex DLM](https://github.com/nace-ai/drex-dlm) model yourself instead of using the hosted API, no `DREX_API_KEY` is needed:
+
+1. **Start the server.** Follow the [Quick start](https://github.com/nace-ai/drex-dlm#quick-start) in the Drex DLM repository, using any of its runners. Check that it is up: `curl http://127.0.0.1:8000/health` (the default port is 8000; the other runners use 8097 and 11434).
+
+2. **Install the skill** for your agent with the instructions above.
+
+3. **Point your agent at your server.** Add this line to your agent's instructions (for example `AGENTS.md`), using your server's address:
+
+   > For System One decisions, use my self-hosted Drex at http://127.0.0.1:8000. Do not fall back to hosted Drex.
+
+Self-hosted requests use the same `POST /v1/systemone` format as the hosted API, with no `Authorization` header. The bundled helper only talks to hosted Drex, so your agent uses an ordinary HTTP client for your server. Keep the server on `127.0.0.1` unless you add authentication in front of it, and never send a hosted API key to it. See the repository for hardware requirements and license terms.
