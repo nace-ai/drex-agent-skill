@@ -59,7 +59,7 @@ Live Drex docs are the source of truth for fields, models, limits, errors, and r
 | Context and rate limits | [Limits](https://drex.nace.ai/llms.mdx/docs/reference/limits/content.md) |
 | Request and response contract | [API reference](https://drex.nace.ai/llms.mdx/docs/api-reference/systemone/content.md) |
 | Retry behavior | [Errors and retries](https://drex.nace.ai/llms.mdx/docs/guides/errors-and-retries/content.md) |
-| Self-host open weights | [Server README](https://github.com/nace-ai/drex-dlm) and [model card](https://huggingface.co/nace-ai/drex-dlm) |
+| Self-host open weights | [Server README](https://github.com/nace-ai/drex-decision-models) and [model card](https://huggingface.co/nace-ai/drex-v1.5) |
 
 If live docs are unavailable, state that limitation. Do not invent version-dependent limits, model ids, prices, or error strings.
 

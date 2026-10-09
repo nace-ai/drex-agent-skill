@@ -187,9 +187,9 @@ Restart your agent after installation to load Drex. For cloud agents, configure 
 
 ## Self-hosted Drex
 
-To run the open-source [Drex DLM](https://github.com/nace-ai/drex-dlm) model yourself instead of using the hosted API, no `DREX_API_KEY` is needed:
+To run the open-source [Drex](https://github.com/nace-ai/drex-decision-models) models yourself instead of using the hosted API, no `DREX_API_KEY` is needed:
 
-1. **Start the server.** Follow the [Quick start](https://github.com/nace-ai/drex-dlm#quick-start) in the Drex DLM repository, using any of its runners. Check that it is up: `curl http://127.0.0.1:8000/health` (the default port is 8000; the other runners use 8097 and 11434).
+1. **Start the server.** Follow the [Runners](https://github.com/nace-ai/drex-decision-models#runners) section of the Drex repository, using any of its runners. Check that it is up: `curl http://127.0.0.1:8000/health` (the default port is 8000; the other runners use 8097 and 11434).
 
 2. **Install the skill** for your agent with the instructions above.
 

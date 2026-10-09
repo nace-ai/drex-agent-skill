@@ -153,7 +153,7 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("## Restart your agent\n", readme)
         self.assertLess(readme.index("### DeepSeek Harness\n"), readme.index("### Other harness\n"))
         self.assertIn("## Self-hosted Drex\n", readme)
-        self.assertIn("https://github.com/nace-ai/drex-dlm#quick-start", readme)
+        self.assertIn("https://github.com/nace-ai/drex-decision-models#runners", readme)
         self.assertIn("curl http://127.0.0.1:8000/health", readme)
         self.assertLess(readme.index("### Other harness\n"), readme.index("## Self-hosted Drex\n"))
         self.assertNotIn("--config make_default=false", readme)
