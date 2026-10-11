@@ -44,6 +44,33 @@ For an open-ended request, suggest a few useful decision points and a starting d
 
 Separate independently useful judgments. Give speculative questions explicit premises: questions in one request cannot read each other's answers. Use a second request when an earlier result is needed to fetch evidence, construct state, or determine the next options. Reuse raw judgments when only downstream weights or display filters change.
 
+## Scan a repository
+
+When the user asks to scan, audit, or drexify a codebase or a large part of one, map every decision site before changing code.
+
+1. **Inventory.** Within the user's scope, find semantic decisions: model calls whose output is a label, boolean, pick-one-of-N, ranking, or level; heuristic or keyword classifiers that stand in for a judgment; rerankers and relevance filters; verification of extracted values; existing Drex calls. Skip text generation, chat, summarization, embeddings, and deterministic logic.
+2. **Record each site.** Plain-language process name, a verified `path:line` pointer, the current mechanism, the Drex shape (`choice`, `noul`, or `score`), fit, deployment constraints, and status: already on Drex, partial, candidate, or implemented in this session. One entry per decision, not per helper.
+3. **Lead with a whole-repo summary,** then list the processes grouped by product area or workflow:
+
+```text
+Your repo has been scanned. Identified 23 sites of drexification (5 already on Drex, 2 implemented now, 16 candidates). Below is the list of processes:
+
+- Document splitting (`src/ingest/split.py:42`): already on Drex.
+- Document classification (`src/ingest/classify.py:88`): implemented now, choice over 11 section types, behind `USE_DREX_CLASSIFY`.
+- Template selection for the task (`src/tasks/templates.py:51`): candidate, choice over template ids.
+- Audit policy identification (`src/policy/match.py:120`): candidate, noul per policy.
+```
+
+Counts must match the list. Mark a site implemented only when it was changed and verified in this session. Never report planned work as done. If the user or repository requires another report format, put the summary inside that format instead of replacing it.
+
+### Pace the work
+
+- The scan and summary are a complete deliverable. They do not require implementing every site in one pass.
+- In plan mode or a read-only session, scan and summarize only, then present the implementation plan in the harness's own plan format.
+- When implementing, change one site or one group of closely related sites at a time, and follow the repository's branch, review, size, and test conventions. Start with high-fit, low-risk sites unless the user sets the order.
+- Respect deployment constraints and note them per site. Workflow engines with deterministic replay (for example Temporal) need Drex calls inside activities, not workflow code. Self-hosted, air-gapped, or customer-hosted deployments may need the self-hosted backend or the existing provider path kept available. Gate new paths with the repository's existing configuration or flag mechanism when one exists.
+- On a re-scan, update the existing list and keep pointers stable rather than starting over.
+
 ## Read current docs
 
 Live Drex docs are the source of truth for fields, models, limits, errors, and response semantics. Fetch the relevant pages before writing an integration. Markdown pages use `https://drex.nace.ai/llms.mdx/docs/<slug>/content.md`; HTML uses `https://drex.nace.ai/docs/<slug>`.
