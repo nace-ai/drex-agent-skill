@@ -66,6 +66,9 @@ FUNC_START = re.compile(
     r")")
 CALL_NAME = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
+CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
+ASSIGNED = re.compile(r"^\s*(?:(?:export|const|let|var|final|static|private|public|protected|readonly|pub)\s+)*"
+                      r"([A-Za-z_]\w*)\s*(?::[^=]+)?:?=(?!=)")
 DEF_NAME = re.compile(r"\b(?:def|function|func|fn|fun)\s+(\w+)")
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
@@ -82,10 +85,14 @@ SIGNALS = (
     ("llm-mention", re.compile(r"\bllm\w*|\w*_llm\b|\bLLM|judge\.complete|\bAgent\(|\bprompt\b", re.I)),
     ("label-set", re.compile(r"\bLiteral\[\s*['\"]")),
     ("fuzzy", re.compile(r"rapidfuzz|fuzzywuzzy|thefuzz|SequenceMatcher|jaro|levenshtein|\bfuzz\.|get_close_matches", re.I)),
-    ("regex", re.compile(r"\bre\.(?:compile|search|match|fullmatch|findall)\(|new RegExp\(")),
+    ("regex", re.compile(r"\bre\.(?:compile|search|match|fullmatch|findall)\(|new RegExp\(|"
+                         r"\bregexp\.(?:MustCompile|Compile|MatchString)\(|\bPattern\.compile\(|\bRegex::new\(|"
+                         r"\bpreg_match\(")),
     ("rerank", re.compile(r"cross.?encoder|rerank", re.I)),
     ("text-rule", re.compile(r"\.lower\(\)\s*(?:in\b|==|\.startswith|\.endswith)|\bin\s+[\w.]+\.lower\(\)|"
-                             r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\.(?:includes|startsWith)")),
+                             r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\s*(?:===?|\.includes|\.startsWith|\.endsWith)|"
+                             r"\bstrings\.ToLower\([^)]*\)\s*(?:==|!=)|\bstrings\.(?:Contains|HasPrefix|HasSuffix)\(strings\.ToLower|"
+                             r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(")),
 )
 WRAPPER_MIN_LEN = 8
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
@@ -257,9 +264,26 @@ def propagate(grouped, calls, seeds, tag):
                 changed = True
 
 
-def by_function(spans, found):
-    """{(line, qualified name): kinds} for hit lines inside a function, plus same-file call propagation.
+def file_constants(lines, found, spans):
+    """{name: kinds} for top-level constants whose definition holds a rule signal, such as a compiled regex
+    or a label set. A multi-line definition is traced back to its assignment line."""
+    constants = {}
+    for number, kinds in found:
+        rule = set(kinds) & CONSTANT_KINDS
+        if not rule or owner_of(spans, number):
+            continue
+        for back in range(number, max(0, number - 4), -1):
+            match = ASSIGNED.match(lines[back - 1])
+            if match:
+                constants.setdefault(match.group(1), set()).update(rule)
+                break
+    return constants
 
+
+def by_function(spans, found, lines):
+    """{(line, qualified name): kinds} for hit lines inside a function, plus two kinds of inheritance.
+
+    A function that uses a top-level rule constant inherits its signals.
     `local-call` follows any strong signal, for decision-named functions built on a same-file helper.
     `model-reach` follows model calls only, for learning the repository's model wrappers."""
     grouped = {}
@@ -267,16 +291,23 @@ def by_function(spans, found):
         owner = owner_of(spans, number)
         if owner:
             grouped.setdefault((owner[0], owner[2]), set()).update(kinds)
+    constants = file_constants(lines, found, spans)
+    if constants:
+        uses = re.compile(r"\b(" + "|".join(map(re.escape, constants)) + r")\b")
+        for start, end, name, _ in spans:
+            used = set(uses.findall("\n".join(lines[start:end])))
+            if used:
+                grouped.setdefault((start, name), set()).update(*(constants[u] for u in used))
     calls = {(s[0], s[2]): s[3] for s in spans}
     propagate(grouped, calls, FUNCTION_STRONG, "local-call")
     propagate(grouped, calls, {"model-call", "wrapper-call"}, "model-reach")
     return grouped
 
 
-def candidate_functions(spans, found):
+def candidate_functions(spans, found, lines):
     """Functions that look like a decision, in line order."""
     out = []
-    for (line, name), kinds in sorted(by_function(spans, found).items()):
+    for (line, name), kinds in sorted(by_function(spans, found, lines).items()):
         if kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK):
             out.append({"name": name, "line": line, "kinds": sorted(kinds - {"model-reach"})})
     return out
@@ -298,13 +329,13 @@ def keep_file(found):
     return bool(kinds & STRONG or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
 
 
-def wrapper_names(spans, found):
+def wrapper_names(spans, found, lines):
     """The repository's own model client layer: public, non-decision functions in files that import a model
     library and reach a model call directly or through same-file helpers."""
     if not any("model-import" in kinds for _, kinds in found):
         return set()
     names = set()
-    for (_, qualified), kinds in by_function(spans, found).items():
+    for (_, qualified), kinds in by_function(spans, found, lines).items():
         name = short(qualified)
         if (kinds & MODEL_REACH and len(name) >= WRAPPER_MIN_LEN and name not in WRAPPER_STOP
                 and not name.startswith(("_", "test")) and not DECISION_NAME.search(name)):
@@ -351,7 +382,7 @@ def scan(repo, include_tests=False, groups=None):
         found = line_hits(text)
         if keep_file(found):
             remember(rel, text, found)
-            wrappers |= wrapper_names(spans[rel], found)
+            wrappers |= wrapper_names(spans[rel], found, text.splitlines())
     if wrappers:
         callers, defined = [], {}
         for rel, text in read_scannable(repo, rels):
@@ -372,8 +403,7 @@ def scan(repo, include_tests=False, groups=None):
     for rel, found in sorted(hits.items()):
         entry = by_area.setdefault(areas[rel], {"files": [], "hits": 0, "functions": 0})
         kinds = sorted({k for _, ks in found for k in ks})
-        functions = candidate_functions(spans.pop(rel), found)
-        texts.pop(rel)
+        functions = candidate_functions(spans.pop(rel), found, texts.pop(rel).splitlines())
         entry["files"].append({"path": rel, "kinds": kinds, "functions": functions,
                                "lines": [n for n, _ in found[:MAX_LINES_PER_FILE]], "hits": len(found)})
         entry["hits"] += len(found)

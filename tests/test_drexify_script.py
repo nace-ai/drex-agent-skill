@@ -160,6 +160,23 @@ class DrexifyScriptTests(unittest.TestCase):
         (self.repo / "shared/core/other.py").write_text("def generate_text(p):\n    return p\n")
         self.assertEqual(drexify.scan(self.repo)["wrappers"], [])
 
+    def test_decision_functions_inherit_top_level_rule_constants(self):
+        (self.repo / "shared/core/cells.py").write_text(
+            "import re\n\n_CURRENCY_RE = re.compile(\n    r'^[$]?[0-9,]+$'\n)\n\n"
+            "def classify_cell(value):\n    return 'money' if _CURRENCY_RE.match(value) else 'text'\n\n"
+            "def load(value):\n    return value\n")
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["shared/core/cells.py"]["functions"]], ["classify_cell"])
+
+    def test_go_regexp_and_keyword_rules_are_signals(self):
+        (self.repo / "services/search/app/detect.go").write_text(
+            "package app\n\nvar repeatRe = regexp.MustCompile(`(.)\\1{19,}`)\n\n"
+            "func detectRepetition(text string) bool {\n\treturn repeatRe.MatchString(text)\n}\n\n"
+            "func matchLabel(label string) bool {\n\treturn strings.EqualFold(label, \"unknown\")\n}\n")
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["services/search/app/detect.go"]["functions"]],
+                         ["detectRepetition", "matchLabel"])
+
     def test_model_json_schema_is_not_a_model_call(self):
         kinds = {k for _, ks in drexify.line_hits("schema = Model.model_json_schema()\n") for k in ks}
         self.assertNotIn("model-call", kinds)
