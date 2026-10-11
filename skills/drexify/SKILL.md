@@ -55,7 +55,7 @@ Counting must be mechanical, so two scans of the same code give the same number.
 - One model call that returns several judgments at once is one site. Give the shape of the judgment the code acts on first, and name the others in the note.
 - In scope: production code and evaluation code. Out of scope: tests, fixtures, notebooks, generated code, and vendored code.
 - Out of scope: text generation, chat, summarization, embeddings, and fixed logic. Fixed logic includes thresholds on measured numbers (lengths, counts, scores), also when the score compares two texts, such as edit distance, token overlap, or recall. It also includes schema checks, exact lookups, and patterns that recognize a format, such as a number, date, currency, ID, or markup syntax. A keyword list or pattern matched against free text to guess its meaning, such as intent, topic, tone, or document type, is a site.
-- Functions with no callers are not counted, and neither are functions reached only from them. Mention them in a separate note. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
+- Functions with no callers are not counted, and neither are functions reached only from them. Mention them in a separate note. Being public does not make a function called. Code that cannot run as checked in, for example because it imports a module missing from the repository, is not counted either. The one exception is a published library, where outside users are the callers. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
 
 ## Pick the status
 
