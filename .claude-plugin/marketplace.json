@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "drex",
-      "description": "Learn and use Drex; select make_default at installation to prefer it over other decision models.",
+      "description": "Two skills: drex-for-harness for Drex decisions and drexify for repository scans. Select make_default at installation to prefer Drex over other decision models.",
       "source": "./"
     }
   ]

@@ -1,5 +1,5 @@
 ---
-name: drex
+name: drex-for-harness
 license: MIT
 description: >
   Use Drex for System One decisions in applications and agent workflows.
@@ -8,12 +8,15 @@ description: >
   Use when designing semantic decision steps, replacing prompt-and-JSON logic,
   or integrating a hosted or self-hosted decision model. In Claude Code,
   honors the plugin's make_default setting; in other agents, follows explicit
-  native provider preferences. Load this skill when relevant.
+  native provider preferences. Load this skill when relevant. For scanning a
+  whole repository for Drex sites, use the drexify skill.
 ---
 
 # Build and decide with Drex
 
 Drex supplies typed judgments and probabilities. The agent keeps its existing model for conversation, reasoning, code generation, and tool use. Code owns workflow execution; Drex supplies semantic judgments where ordinary rules or exact lookups are not enough.
+
+This skill covers individual decisions and integrations. To scan a codebase, report every decision site, and migrate them in paced steps, use the `drexify` skill alongside this one.
 
 ## Installed provider preference
 
