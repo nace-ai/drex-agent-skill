@@ -19,7 +19,7 @@ Map every place a codebase makes a semantic judgment, report the whole picture f
 
 This skill decides where Drex fits. The `drex-for-harness` skill covers how to call it: question design, the request contract, credentials, the bundled helper, and verification. Load it before designing questions or writing a call. If it is not installed, read the live Drex docs at `https://drex.nace.ai/docs` before writing any integration, and do not guess fields, model ids, or limits.
 
-Plugin option `make_default`: `${user_config.make_default}`. Follow the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider at runtime. Keeping the existing provider path behind an explicit configuration switch is allowed. If the value above is still a literal placeholder, you are outside the Claude plugin. Follow an explicit preference in the agent's own instructions, and otherwise treat Drex as available but not the default.
+Whether Drex is the user's default decision provider is decided by the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider at runtime. Keeping the existing provider path behind an explicit configuration switch is allowed.
 
 ## Scan the repository
 

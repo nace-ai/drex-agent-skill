@@ -124,8 +124,8 @@ class PluginTests(unittest.TestCase):
             self.assertIn("license: MIT\n", front)
             self.assertIn("description: >\n", front)
             self.assertNotIn("disable-model-invocation: true", text)
-            self.assertIn("${user_config.make_default}", text)
         skill = skills[0].read_text()
+        self.assertIn("${user_config.make_default}", skill)
         self.assertIn("## Find the useful workflow", skill)
         self.assertIn("## Design the questions", skill)
         self.assertIn("## Call Drex", skill)
@@ -144,6 +144,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn("plan mode", drexify)
         self.assertIn("activities, not workflow code", drexify)
         self.assertNotIn("## Call Drex", drexify)  # API contract lives in drex-for-harness only
+        self.assertIsNone(re.search(r"claude|user_config|plugin", drexify, re.I))  # agent-agnostic
         readme = (ROOT / "README.md").read_text()
         self.assertTrue(readme.startswith("# Drex for coding agents\n"))
         self.assertIn("## Skills\n", readme)
