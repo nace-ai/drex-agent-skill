@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Drexify helper. Python 3.9+, standard library only. Reads files, never calls a model or the network.
 
-scan:  one cheap signal search over the whole repository, grouped by area.
+scan:  one cheap signal search over the whole repository, grouped by area, listing the
+       candidate decision functions in each file. --save writes the map once and
+       --from reads it back, so parallel helpers never repeat the search.
 check: lint a drexify report. Counts must match the headline, statuses must be valid,
        and every `path:line` pointer must resolve. --fix rewrites shortened paths.
 """
 import argparse
+import ast
 import json
 import os
 from pathlib import Path
@@ -27,9 +30,22 @@ SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks__"}
-STRONG = {"drex", "model-call", "model-import", "rerank", "fuzzy"}
+STRONG = {"drex", "model-call", "model-import", "rerank", "fuzzy", "wrapper-call"}
+FUNCTION_STRONG = {"drex", "model-call", "rerank", "fuzzy"}
+FUNCTION_STRONG = FUNCTION_STRONG | {"wrapper-call"}
+FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "model-call", "text-rule", "local-call"}
+PROPAGATES = FUNCTION_STRONG | {"local-call"}
 MAX_BYTES = 1_000_000
 MAX_LINES_PER_FILE = 8
+NOT_COUNTED = "not counted"
+HEADING = re.compile(r"^\s*(?:#{1,6}\s+(?P<md>.+)|\*\*(?P<bold>[^*]+)\*\*:?\s*)$")
+NOT_FUNCTIONS = {"if", "for", "while", "switch", "catch", "return", "function", "with", "elif", "else", "do", "try", "new"}
+FUNC_START = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:"
+    r"def\s+(?P<py>\w+)|function\s*\*?\s*(?P<js>\w+)|func\s+(?:\([^)]*\)\s*)?(?P<go>\w+)|fn\s+(?P<rs>\w+)|"
+    r"(?:const|let|var)\s+(?P<arrow>\w+)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:function\b|\([^)]*\)[^=]*=>|\w+\s*=>)|"
+    r"(?:(?:public|private|protected|static|override|readonly|async)\s+)*(?P<method>[A-Za-z_]\w*)\s*\([^)]*\)\s*"
+    r"(?::\s*[^{=]+)?\{\s*$)")
 
 SIGNALS = (
     ("drex", re.compile(r"\b(systemone|drex)\b", re.I)),
@@ -48,7 +64,12 @@ SIGNALS = (
     ("fuzzy", re.compile(r"rapidfuzz|fuzzywuzzy|thefuzz|SequenceMatcher|jaro|levenshtein|\bfuzz\.|get_close_matches", re.I)),
     ("regex", re.compile(r"\bre\.(?:compile|search|match|fullmatch|findall)\(|new RegExp\(")),
     ("rerank", re.compile(r"cross.?encoder|rerank", re.I)),
+    ("text-rule", re.compile(r"\.lower\(\)\s*(?:in\b|==|\.startswith|\.endswith)|\bin\s+[\w.]+\.lower\(\)|"
+                             r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\.(?:includes|startsWith)")),
 )
+WRAPPER_MIN_LEN = 8
+WRAPPER_STOP = {"__init__", "__call__", "generate", "complete", "completion", "run_sync", "execute", "process", "create",
+                "invoke", "predict", "request", "response", "get_client", "get_model", "from_config", "validate"}
 
 
 ANY_SIGNAL = re.compile("|".join(f"(?:{pattern.pattern})" for _, pattern in SIGNALS), re.I | re.M)
@@ -106,11 +127,121 @@ def assign_areas(paths):
     return areas
 
 
-def scan(repo, include_tests=False, groups=0):
-    repo = Path(repo)
-    listed = list_files(repo)
-    hits = {}
-    scanned = 0
+def called_names(node):
+    names = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            func = sub.func
+            names.add(func.id if isinstance(func, ast.Name) else getattr(func, "attr", ""))
+    return names - {""}
+
+
+def python_spans(text):
+    """(start, end, qualified name, called names) for every Python function, or None when the file does not parse."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    spans = []
+
+    def visit(node, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                spans.append((child.lineno, getattr(child, "end_lineno", None) or child.lineno, prefix + child.name,
+                              called_names(child)))
+                visit(child, f"{prefix}{child.name}.")
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.")
+            else:
+                visit(child, prefix)
+    visit(tree, "")
+    return spans
+
+
+def generic_starts(lines):
+    starts = []
+    for number, line in enumerate(lines, 1):
+        match = FUNC_START.match(line)
+        if match:
+            name = next(v for v in match.groupdict().values() if v)
+            if name not in NOT_FUNCTIONS:
+                starts.append((number, name))
+    return starts
+
+
+def by_function(rel, text, found):
+    """{(line, qualified name): kinds} for hit lines inside a function.
+
+    In Python, a function that calls a same-file function with a strong signal inherits it as
+    `local-call`, repeated until nothing changes. That follows in-house helper chains such as
+    generate_dict -> generate -> model call without reading other files."""
+    spans = python_spans(text) if rel.endswith(".py") else None
+    starts = generic_starts(text.splitlines()) if spans is None else []
+    grouped = {}
+    for number, kinds in found:
+        if spans is not None:
+            inside = [s for s in spans if s[0] <= number <= s[1]]
+            innermost = max(inside, key=lambda s: s[0]) if inside else None
+            owner = (innermost[0], innermost[2]) if innermost else None
+        else:
+            before = [s for s in starts if s[0] <= number]
+            owner = before[-1] if before else None
+        if owner:
+            grouped.setdefault(owner, set()).update(kinds)
+    if spans:
+        calls = {(s[0], s[2]): s[3] for s in spans}
+        changed = True
+        while changed:
+            strong = {key[1].split(".")[-1] for key, kinds in grouped.items() if kinds & PROPAGATES}
+            changed = False
+            for key, names in calls.items():
+                kinds = grouped.get(key, set())
+                if not kinds & PROPAGATES and names & strong - {key[1].split(".")[-1]}:
+                    grouped[key] = kinds | {"local-call"}
+                    changed = True
+    return grouped
+
+
+def candidate_functions(rel, text, found):
+    """Functions that look like a decision, in line order."""
+    out = []
+    for (line, name), kinds in sorted(by_function(rel, text, found).items()):
+        if kinds & FUNCTION_STRONG or ("decision-name" in kinds and kinds & FUNCTION_WEAK):
+            out.append({"name": name, "line": line, "kinds": sorted(kinds)})
+    return out
+
+
+def line_hits(text, wrappers=None):
+    found = []
+    for number, line in enumerate(text.splitlines(), 1):
+        kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
+        if wrappers is not None and wrappers.search(line) and not FUNC_START.match(line):
+            kinds.append("wrapper-call")
+        if kinds:
+            found.append((number, kinds))
+    return found
+
+
+def keep_file(found):
+    kinds = {k for _, ks in found for k in ks}
+    return bool(kinds & STRONG or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
+
+
+def wrapper_names(rel, text, found):
+    """The repository's own model client layer: in files that import a model library, functions that
+    reach a model call directly or through same-file helpers."""
+    if not any("model-import" in kinds for _, kinds in found):
+        return set()
+    names = set()
+    for (_, qualified), kinds in by_function(rel, text, found).items():
+        if kinds & {"model-call", "local-call"}:
+            name = qualified.split(".")[-1]
+            if len(name) >= WRAPPER_MIN_LEN and name not in WRAPPER_STOP and not name.startswith(("test", "__")):
+                names.add(name)
+    return names
+
+
+def read_scannable(repo, listed, include_tests):
     for rel in listed:
         if not scannable(rel, include_tests):
             continue
@@ -118,37 +249,62 @@ def scan(repo, include_tests=False, groups=0):
         try:
             if path.stat().st_size > MAX_BYTES:
                 continue
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            yield rel, path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
+
+
+def scan(repo, include_tests=False, groups=0):
+    """Two passes. The first finds direct signals and learns the repository's model wrappers.
+    The second marks callers of those wrappers, so decisions behind an in-house client are not missed."""
+    repo = Path(repo)
+    listed = list_files(repo)
+    hits, texts, wrappers, scanned = {}, {}, set(), 0
+    for rel, text in read_scannable(repo, listed, include_tests):
         scanned += 1
         if not ANY_SIGNAL.search(text):
             continue
-        found = []
-        for number, line in enumerate(text.splitlines(), 1):
-            kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
-            if kinds:
-                found.append((number, kinds))
-        kinds = {k for _, ks in found for k in ks}
-        if kinds & STRONG or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}):
+        found = line_hits(text)
+        if keep_file(found):
             hits[rel] = found
+            texts[rel] = text
+            wrappers |= wrapper_names(rel, text, found)
+    if wrappers:
+        pattern = re.compile(r"\b(?:" + "|".join(sorted(map(re.escape, wrappers))) + r")\s*\(")
+        for rel, text in read_scannable(repo, listed, include_tests):
+            if pattern.search(text):
+                found = line_hits(text, pattern)
+                if keep_file(found):
+                    hits[rel] = found
+                    texts[rel] = text
     areas = assign_areas(list(hits))
     by_area = {}
+    functions_total = 0
     for rel, found in sorted(hits.items()):
-        entry = by_area.setdefault(areas[rel], {"files": [], "hits": 0})
+        entry = by_area.setdefault(areas[rel], {"files": [], "hits": 0, "functions": 0})
         kinds = sorted({k for _, ks in found for k in ks})
-        entry["files"].append({"path": rel, "kinds": kinds, "lines": [n for n, _ in found[:MAX_LINES_PER_FILE]],
-                               "hits": len(found)})
+        functions = candidate_functions(rel, texts.pop(rel), found)
+        entry["files"].append({"path": rel, "kinds": kinds, "functions": functions,
+                               "lines": [n for n, _ in found[:MAX_LINES_PER_FILE]], "hits": len(found)})
         entry["hits"] += len(found)
-    result = {"listed": len(listed), "scanned": scanned, "files_with_hits": len(hits), "areas": by_area}
+        entry["functions"] += len(functions)
+        functions_total += len(functions)
+    result = {"repo": str(repo.resolve()), "listed": len(listed), "scanned": scanned, "files_with_hits": len(hits),
+              "candidate_functions": functions_total, "wrappers": sorted(wrappers), "areas": by_area}
     if groups > 0:
-        bins = [{"areas": [], "hits": 0} for _ in range(groups)]
-        for name, entry in sorted(by_area.items(), key=lambda kv: -kv[1]["hits"]):
-            target = min(bins, key=lambda b: b["hits"])
-            target["areas"].append(name)
-            target["hits"] += entry["hits"]
-        result["groups"] = [b for b in bins if b["areas"]]
+        result["groups"] = make_groups(by_area, groups)
     return result
+
+
+def make_groups(by_area, groups):
+    """Greedy balance by reading work: one unit per file plus one per candidate function."""
+    bins = [{"areas": [], "work": 0} for _ in range(groups)]
+    work = {name: len(e["files"]) + e["functions"] for name, e in by_area.items()}
+    for name in sorted(by_area, key=lambda n: (-work[n], n)):
+        target = min(bins, key=lambda b: b["work"])
+        target["areas"].append(name)
+        target["work"] += work[name]
+    return [b for b in bins if b["areas"]]
 
 
 def print_scan(result, area=None, group=0):
@@ -160,16 +316,21 @@ def print_scan(result, area=None, group=0):
             if entry is None:
                 print(f"no hits in area {name}")
                 continue
-            print(f"## {name}: {len(entry['files'])} files, {entry['hits']} hits")
-            for f in sorted(entry["files"], key=lambda f: -f["hits"]):
-                print(f"{f['path']}  [{','.join(f['kinds'])}]  lines {','.join(map(str, f['lines']))}")
+            print(f"## {name}: {len(entry['files'])} files, {entry['functions']} candidate functions")
+            for f in sorted(entry["files"], key=lambda f: f["path"]):
+                print(f"{f['path']}  [{','.join(f['kinds'])}]")
+                for fn in f["functions"]:
+                    print(f"  {f['path']}:{fn['line']}  {fn['name']}  [{','.join(fn['kinds'])}]")
+                if not f["functions"]:
+                    print(f"  no candidate function, hit lines {','.join(map(str, f['lines']))}")
         return
     print(f"signal scan: {result['listed']} files listed, {result['scanned']} scanned, "
-          f"{result['files_with_hits']} with strong hits, {len(result['areas'])} areas")
-    for name, entry in sorted(result["areas"].items(), key=lambda kv: -kv[1]["hits"]):
-        print(f"{name}: {len(entry['files'])} files, {entry['hits']} hits")
+          f"{result['files_with_hits']} with strong hits, {result['candidate_functions']} candidate functions, "
+          f"{len(result['areas'])} areas")
+    for name, entry in sorted(result["areas"].items(), key=lambda kv: (-kv[1]["functions"], kv[0])):
+        print(f"{name}: {len(entry['files'])} files, {entry['functions']} candidate functions")
     for i, g in enumerate(result.get("groups", []), 1):
-        print(f"group {i} ({g['hits']} hits): {' '.join(g['areas'])}")
+        print(f"group {i} (work {g['work']}): {' '.join(g['areas'])}")
 
 
 def line_counts(repo, files, cache):
@@ -233,9 +394,14 @@ def check(report_path, repo, fix=False):
     tally = {s: 0 for s in STATUSES}
     seen = {}
     sites = 0
+    counted = True
     for number, line in enumerate(new_text.splitlines(), 1):
+        heading = HEADING.match(line)
+        if heading:
+            counted = NOT_COUNTED not in (heading.group("md") or heading.group("bold")).lower()
+            continue
         site = SITE.match(line)
-        if not site:
+        if not site or not counted:
             continue
         rest = site.group("rest").strip().lower()
         status = next((s for s in STATUSES if rest.startswith(s.lower())), None)
@@ -277,6 +443,8 @@ def main(argv=None):
     s.add_argument("--groups", type=int, default=0, help="split areas into N balanced groups for parallel helpers")
     s.add_argument("--group", type=int, default=0, help="with --groups, print the files of group K only")
     s.add_argument("--area", help="print the files of one area only")
+    s.add_argument("--save", metavar="FILE", help="also write the full map as JSON, for helpers to read with --from")
+    s.add_argument("--from", dest="source", metavar="FILE", help="read a map written by --save instead of searching again")
     s.add_argument("--json", action="store_true")
     c = sub.add_parser("check", help="lint a drexify report")
     c.add_argument("report", help="report file, or - to read it from stdin (no --fix)")
@@ -285,7 +453,14 @@ def main(argv=None):
     c.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "scan":
-        result = scan(args.repo, args.include_tests, args.groups)
+        if args.source:
+            result = json.loads(Path(args.source).read_text(encoding="utf-8"))
+            if args.groups and len(result.get("groups", [])) != args.groups:
+                result["groups"] = make_groups(result["areas"], args.groups)
+        else:
+            result = scan(args.repo, args.include_tests, args.groups)
+        if args.save:
+            Path(args.save).write_text(json.dumps(result), encoding="utf-8")
         if args.group and not 1 <= args.group <= len(result.get("groups", [])):
             parser.error("--group K needs --groups N with 1 <= K <= number of groups")
         print(json.dumps(result, indent=1)) if args.json else print_scan(result, args.area, args.group)
@@ -294,7 +469,7 @@ def main(argv=None):
     if args.json:
         print(json.dumps(result, indent=1))
     else:
-        counts = ", ".join(f"{n} {s}" for s, n in result["statuses"].items())
+        counts = ", ".join(f"{n} {'candidates' if s == 'candidate' else s}" for s, n in result["statuses"].items())
         print(f"{result['sites']} sites ({counts})")
         for f in result["pointers_fixed"]:
             print(f"fixed: {f}")

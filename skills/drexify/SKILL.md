@@ -25,19 +25,22 @@ Whether Drex is the user's default decision provider is decided by the provider 
 
 `scripts/drexify.py` sits next to this file. Resolve it relative to the real location of this SKILL.md, not the current directory. It needs Python 3.9+, uses only the standard library, reads files, and never calls a model or the network.
 
-- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N>` searches the whole repository once for decision signals in a few seconds. It prints a short map of areas and N balanced groups of areas.
-- Add `--group <K>` to print the file list for group K only, or `--area <name>` for one area. An area ending in `/*` means only the files directly inside that folder.
+- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N> --save <map.json>` searches the whole repository once for decision signals, in about a minute on a large repository. It prints a short map of areas and N balanced groups, and writes the full map to `<map.json>`.
+- `scan --from <map.json> --groups <N> --group <K>` prints group K from the saved map instantly, without searching again. Each file is followed by its candidate functions as `path:line  name  [signals]`. `--area <name>` prints one area. An area ending in `/*` means only the files directly inside that folder.
+- Candidate functions are functions that call a model, Drex, a reranker, or fuzzy matching, call the repository's own model wrappers, or have a decision name and use labels, regexes, or keyword rules. The list is a checklist, not the answer. Some candidates are not decisions, and some decisions are not listed.
 - `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites a shortened path only when it matches exactly one file. Use `-` as the report to read it from standard input without writing anything.
 
 If the script is missing or cannot run, do the same steps by hand.
 
 ## Scan the repository
 
-1. **Map.** Run `scan` once. Its signals are model calls and model library imports, existing Drex calls, rerankers, fuzzy matching, and decision-named functions that use label sets, regexes, or model wrappers. Treat the list as a starting point, not the full inventory.
-2. **Split when it pays.** With three or more areas and helpers available, give each helper one group. Pass it the exact command `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N> --group <K>` with absolute paths and the same N, and tell it to search or read only inside its group's areas. With one or two areas, scan alone, because one agent is cheaper.
-3. **Read narrowly.** Open only the lines around each hit, enough to see the decision function, its inputs, and its outputs. Also look nearby for keyword lists or hand-tuned rules that guess what text means, which the scan can miss.
-4. **Record each site** as one line in the format below. Helpers return these lines only, not prose.
-5. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write a file, pipe the report to `check -` and apply the reported fixes yourself.
+1. **Map.** Run `scan --save` once, with the map file outside the repository (for example in the system temp folder). If the session cannot write that file, helpers use `scan --repo <root> --groups <N> --group <K>` instead, which repeats the search.
+2. **Split when it pays.** With three or more areas and helpers available, give each helper one group. Pass it the exact command `python3 "<skill-dir>/scripts/drexify.py" scan --from <map.json> --groups <N> --group <K>` with absolute paths and the same N. Tell it to record only sites whose decision function is inside its group. It may search the rest of the repository for callers of a function, but not for new sites. With one or two areas, scan alone, because one agent is cheaper.
+3. **Check every candidate function.** Open the lines of each one, enough to see what it returns. Decide whether it is a site using the rules below. This fixed checklist is what keeps two scans of the same code close.
+4. **Then look past the list.** In flagged files without a candidate, and around the candidates, look for decisions the scan cannot see: keyword lists or hand-tuned rules that guess what text means, and decisions made through an agent or request object built in one place and run in another.
+5. **Return a fixed format.** Each helper returns three parts and nothing else: the site lines in the format below, a `## Not counted` section with any dead code or fixed logic worth noting, and one coverage line such as `Checked 212 of 212 candidate functions, read 40 of 95 files without one.`
+6. **Wait for every helper.** Do not write the report or end the turn while any helper is still running. If a helper fails, rerun its group or scan that group yourself. A report built from some groups is not a scan of the repository.
+7. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write a file, pipe the report to `check -` and apply the reported fixes yourself.
 
 Run helpers on a cheaper, faster model when the agent offers a choice. Keep the strongest model for merging, judging fit, and writing the plan.
 
@@ -55,12 +58,14 @@ Counting must be mechanical, so two scans of the same code give the same number.
 
 ## Pick the status
 
-Use the first status that is true. Use only these four.
+Use the first status that is true. Use only these four. The headline lists them in a different, fixed order.
 
 1. **implemented now:** this session changed the site to Drex and verified it.
-2. **already on Drex:** Drex runs on the default path with default settings.
-3. **partial:** Drex code exists for this site, but it is off by default, behind a flag or setting, or one of several paths.
+2. **already on Drex:** Drex runs on the default path with default settings, all the way from the product's entry point.
+3. **partial:** Drex code exists for this site, but it is off by default, behind a flag or setting, one of several paths, or the default only inside a path that is itself not the default.
 4. **candidate:** no Drex code exists for this site.
+
+Drex code means any code that calls the Drex API, whatever the client is named. Look for the Drex host or its decision endpoints, not only the word Drex.
 
 Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level. A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
 
@@ -81,8 +86,8 @@ Your repo has been scanned. Identified 23 sites of drexification (5 already on D
 - Each site line is `- <process> (`<path:line>`): <status>, <shape>, <short note>.` The pointer is the decision function.
 - Write every pointer as a full path from the repository root, even when it repeats a heading. Do not shorten with `...`, brace groups, or bare filenames.
 - Counts must match the list, including zeros.
-- After the list, state which parts of the repository were read in depth and which were only sampled.
-- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, in a separate note outside the counts.
+- After the list, add a coverage line: how many candidate functions were checked, and which parts of the repository were read in depth or only sampled.
+- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, under a `## Not counted` heading. `check` verifies pointers there but does not count them.
 - Mark a site implemented only when it was changed and verified in this session. Never report planned work as done.
 - If the user or repository requires another report format, put the summary inside that format instead of replacing it.
 - For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
@@ -90,7 +95,7 @@ Your repo has been scanned. Identified 23 sites of drexification (5 already on D
 ## Pace the work
 
 - The scan and summary are a complete deliverable. They do not require implementing every site in one pass.
-- In plan mode or a read-only session, scan and summarize only, then present the implementation plan in the harness's own plan format.
+- In plan mode or a read-only session, scan and summarize only, then present the implementation plan in the harness's own plan format. The scan does not need the live Drex docs. Read them before designing questions or writing a call.
 - When implementing, change one site or one group of closely related sites at a time, and follow the repository's branch, review, size, and test conventions. Start with high-fit, low-risk sites unless the user sets the order.
 - Respect deployment constraints and note them per site. Workflow engines with deterministic replay (for example Temporal) need Drex calls inside activities, not workflow code. Self-hosted, air-gapped, or customer-hosted deployments may need the self-hosted backend or the existing provider path kept available. Gate new paths with the repository's existing configuration or flag mechanism when one exists.
 - On a re-scan, update the existing list and keep pointers stable rather than starting over.

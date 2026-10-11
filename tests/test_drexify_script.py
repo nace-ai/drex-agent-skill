@@ -122,6 +122,50 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertIn("services/*", areas)
         self.assertEqual([f["path"] for f in areas["services/*"]["files"]], ["services/top.py"])
 
+    def test_scan_lists_candidate_functions_with_lines(self):
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertEqual([(fn["name"], fn["line"]) for fn in files["services/billing/app/match.py"]["functions"]],
+                         [("match_contract", 3)])
+
+    def test_scan_follows_in_house_model_wrappers(self):
+        (self.repo / "shared/core/llm.py").write_text(
+            "import openai\n\nclass TextGen:\n    def generate_raw(self, p):\n"
+            "        return client.chat.completions.create(model='m')\n\n"
+            "    def generate_dict(self, p):\n        return self.generate_raw(p)\n")
+        (self.repo / "services/search/app/pick.py").write_text(
+            "from core.llm import TextGen\n\ndef pick_template(q):\n    return TextGen().generate_dict(q)\n\n"
+            "def unrelated(q):\n    return q\n")
+        result = drexify.scan(self.repo)
+        self.assertIn("generate_dict", result["wrappers"])
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["services/search/app/pick.py"]["functions"]], ["pick_template"])
+
+    def test_scan_follows_same_file_helpers_for_decision_named_functions(self):
+        (self.repo / "services/billing/app/gl.py").write_text(
+            "from rapidfuzz import fuzz\n\ndef _score(a, b):\n    return fuzz.ratio(a, b)\n\n"
+            "def match_accounts(rows):\n    return [_score(r, 'x') for r in rows]\n\ndef load(rows):\n    return rows\n")
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["services/billing/app/gl.py"]["functions"]],
+                         ["_score", "match_accounts"])
+
+    def test_scan_save_and_from_skip_the_second_search(self):
+        saved = Path(self.tmp.name) / "map.json"
+        with redirect_stdout(io.StringIO()):
+            drexify.main(["scan", "--repo", str(self.repo), "--groups", "2", "--save", str(saved)])
+        out = io.StringIO()
+        with mock.patch.object(drexify, "scan", side_effect=AssertionError("searched again")), redirect_stdout(out):
+            self.assertEqual(drexify.main(["scan", "--from", str(saved), "--groups", "2", "--group", "1"]), 0)
+        self.assertIn("candidate functions", out.getvalue())
+
+    def test_check_skips_site_shaped_lines_under_not_counted(self):
+        path = self.report(
+            "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+            "- Route (`services/search/app/route.py:1`): candidate.\n\n## Not counted\n\n"
+            "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n")
+        self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+        path.write_text(path.read_text().replace("match.py:3", "match.py:99"))
+        self.assertTrue(any("past the end" in p for p in drexify.check(path, self.repo)["problems"]))
+
     def test_check_reports_bad_pointers_statuses_and_counts(self):
         path = self.report(
             "Identified 3 sites of drexification (1 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
