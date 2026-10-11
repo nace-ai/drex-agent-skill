@@ -275,6 +275,15 @@ class DrexifyScriptTests(unittest.TestCase):
                            "- Step (`services/billing/app/match.py:3`): candidate first.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
 
+    def test_check_reads_hard_wrapped_reports(self):
+        path = self.report("Your repo has been scanned. Identified 1 site of drexification (0 already on\n"
+                           "Drex, 0 partial, 0 implemented now, 1 candidate).\n\n"
+                           "- Pick a template (`services/search/app/route.py:2`):\n"
+                           "  candidate, `choice` over the template names.\n")
+        result = drexify.check(path, self.repo, fix=True)
+        self.assertEqual(result["problems"], [])
+        self.assertIn("route.py:1`):\n  candidate", path.read_text())
+
     def test_check_accepts_range_pointers(self):
         path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Route (`services/search/app/route.py:1-2`): candidate.\n")
         self.assertEqual(drexify.check(path, self.repo, fix=True)["problems"], [])

@@ -17,10 +17,11 @@ import subprocess
 import sys
 
 STATUSES = ("already on Drex", "partial", "implemented now", "candidate")
-HEADLINE = re.compile(
+HEADLINE = re.compile((
     r"Identified (\d+) sites? of drexification \((\d+) already on Drex, (\d+) partial, "
     r"(\d+) implemented now, (\d+) candidates?\)"
-)
+).replace(" ", r"\s+"))
+CONTINUATION = re.compile(r"^\s+(?![-*+]\s|\d+[.)]\s|#|```|~~~)\S")
 SITE = re.compile(r"^\s*[-*]\s+(?P<name>.+?)\s+\(`(?P<ptr>[^`]+)`\):\s*(?P<rest>.*)$")
 CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
 POINTER_EXT = CODE_EXT | {".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql", ".sh", ".html", ".css", ".ini", ".cfg", ".txt",
@@ -632,7 +633,8 @@ def check(report_path, repo, fix=False):
     sites = 0
     uncounted_level = None
     fenced = False
-    headline_at = next((i for i, l in enumerate(lines) if HEADLINE.search(l)), 0)
+    found_headline = HEADLINE.search("\n".join(lines))
+    headline_at = "\n".join(lines)[:found_headline.start()].count("\n") if found_headline else 0
     for index, line in enumerate(lines):
         number = index + 1
         if FENCE.match(line):
@@ -648,7 +650,10 @@ def check(report_path, repo, fix=False):
             if uncounted_level is None and is_not_counted(heading):
                 uncounted_level = level
             continue
-        site = SITE.match(line)
+        block = [index]
+        while block[-1] + 1 < len(lines) and CONTINUATION.match(lines[block[-1] + 1]):
+            block.append(block[-1] + 1)
+        site = SITE.match(" ".join(lines[i].strip() if i != index else line for i in block))
         if not site or uncounted_level is not None:
             continue
         rest = site.group("rest").strip().lower()
@@ -671,7 +676,8 @@ def check(report_path, repo, fix=False):
                 elif start != at:
                     moved = f"{rel}:{start}"
                     if writable:
-                        lines[index] = line.replace(f"(`{ptr}`)", f"(`{moved}`)", 1)
+                        at_line = next((i for i in block if f"(`{ptr}`)" in lines[i]), index)
+                        lines[at_line] = lines[at_line].replace(f"(`{ptr}`)", f"(`{moved}`)", 1)
                         fixed.append(f"{ptr} -> {moved}")
                         ptr = moved
                     else:
