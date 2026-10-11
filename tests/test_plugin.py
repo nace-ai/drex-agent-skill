@@ -140,7 +140,7 @@ class PluginTests(unittest.TestCase):
                        "Do not shorten with `...`", "Counts must match the list, including zeros.", "only sampled",
                        "cheaper, faster model", "If the scan prints one group", "plan mode",
                        "activities, not workflow code", "If the script is missing or cannot run",
-                       "scan --repo <root> --groups <N> --group <K>", "pipe the report to `check -`"):
+                       "scan --repo <root> --groups <N> --group <K>", "pipe the complete final text, plan included, to `check -`"):
             self.assertIn(phrase, drexify)
         self.assertTrue((ROOT / "skills/drexify/scripts/drexify.py").is_file())
         self.assertNotIn("## Call Drex", drexify)  # API contract lives in drex-for-harness only
