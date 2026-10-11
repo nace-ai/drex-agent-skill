@@ -49,19 +49,19 @@ Separate independently useful judgments. Give speculative questions explicit pre
 
 ## Read current docs
 
-Live Drex docs are the source of truth for fields, models, limits, errors, and response semantics. Fetch the relevant pages before writing an integration. Markdown pages use `https://drex.nace.ai/llms.mdx/docs/<slug>/content.md`; HTML uses `https://drex.nace.ai/docs/<slug>`.
+Live Drex docs are the source of truth for fields, models, limits, errors, and response semantics. Fetch the relevant pages before writing an integration. Markdown pages use `https://drex.nace.ai/llms.mdx/docs/drex/<slug>/content.md`; HTML uses `https://drex.nace.ai/docs/drex/<slug>`.
 
 | Task | Read |
 | --- | --- |
-| First request | [Quick start](https://drex.nace.ai/llms.mdx/docs/quickstart/content.md) |
-| Shape questions | [Questions](https://drex.nace.ai/llms.mdx/docs/guides/questions/content.md) |
-| Prepare evidence | [State](https://drex.nace.ai/llms.mdx/docs/guides/state/content.md) |
-| Interpret probabilities | [Reading answers](https://drex.nace.ai/llms.mdx/docs/guides/reading-answers/content.md) |
-| Credentials | [Authentication](https://drex.nace.ai/llms.mdx/docs/guides/authentication/content.md) |
-| Select a model | [Models](https://drex.nace.ai/llms.mdx/docs/reference/models/content.md) |
-| Context and rate limits | [Limits](https://drex.nace.ai/llms.mdx/docs/reference/limits/content.md) |
-| Request and response contract | [API reference](https://drex.nace.ai/llms.mdx/docs/api-reference/systemone/content.md) |
-| Retry behavior | [Errors and retries](https://drex.nace.ai/llms.mdx/docs/guides/errors-and-retries/content.md) |
+| First request | [Quick start](https://drex.nace.ai/llms.mdx/docs/drex/quickstart/content.md) |
+| Shape questions | [Questions](https://drex.nace.ai/llms.mdx/docs/drex/guides/questions/content.md) |
+| Prepare evidence | [State](https://drex.nace.ai/llms.mdx/docs/drex/guides/state/content.md) |
+| Interpret probabilities | [Reading answers](https://drex.nace.ai/llms.mdx/docs/drex/guides/reading-answers/content.md) |
+| Credentials | [Authentication](https://drex.nace.ai/llms.mdx/docs/drex/guides/authentication/content.md) |
+| Select a model | [Models](https://drex.nace.ai/llms.mdx/docs/drex/reference/models/content.md) |
+| Context and rate limits | [Limits](https://drex.nace.ai/llms.mdx/docs/drex/reference/limits/content.md) |
+| Request and response contract | [API reference](https://drex.nace.ai/llms.mdx/docs/drex/api-reference/systemone/content.md) |
+| Retry behavior | [Errors and retries](https://drex.nace.ai/llms.mdx/docs/drex/guides/errors-and-retries/content.md) |
 | Self-host open weights | [Server README](https://github.com/nace-ai/drex-decision-models) and [model card](https://huggingface.co/nace-ai/drex-v1.5) |
 
 If live docs are unavailable, state that limitation. Do not invent version-dependent limits, model ids, prices, or error strings.

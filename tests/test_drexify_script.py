@@ -244,6 +244,11 @@ class DrexifyScriptTests(unittest.TestCase):
         path.write_text(body.replace("pick.py:6", "pick.py:1"))
         self.assertTrue(any("not inside a function" in p for p in drexify.check(path, self.repo, fix=True)["problems"]))
 
+    def test_planning_area_headings_still_count(self):
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                           "## Audit planning\n- Route (`services/search/app/route.py:1`): candidate.\n")
+        self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+
     def test_check_flags_two_sites_in_one_function_after_snapping(self):
         path = self.report("Identified 2 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 2 candidates)\n"
                            "- A (`services/billing/app/match.py:3`): candidate.\n"
@@ -282,7 +287,7 @@ class DrexifyScriptTests(unittest.TestCase):
             "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
             "- Route (`services/search/app/route.py:1`): candidate.\n\n## Not counted\n\n"
             "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n"
-            "\n## Plan\n\n### Steps\n\n- Step one (`services/billing/app/match.py:3`): candidate first.\n"
+            "\n## Implementation plan\n\n### Steps\n\n- Step one (`services/billing/app/match.py:3`): candidate first.\n"
             "**Order**\n- Step two (`services/billing/app/match.py:3`): candidate next.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
         mixed = path.read_text().replace("## Not counted", "## Billing (2 sites, 1 not counted)")

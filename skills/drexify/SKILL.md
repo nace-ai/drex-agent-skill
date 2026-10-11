@@ -17,7 +17,7 @@ Map every place a codebase makes a semantic judgment, report the whole picture f
 
 ## Use with drex-for-harness
 
-This skill decides where Drex fits. The `drex-for-harness` skill covers how to call it: question design, the request contract, credentials, the bundled helper, and verification. Load it before designing questions or writing a call. If it is not installed, read the live Drex docs at `https://drex.nace.ai/docs` before writing any integration, and do not guess fields, model ids, or limits.
+This skill decides where Drex fits. The `drex-for-harness` skill covers how to call it: question design, the request contract, credentials, the bundled helper, and verification. Load it before designing questions or writing a call. If it is not installed, read the live Drex docs at `https://drex.nace.ai/docs/drex` before writing any integration, and do not guess fields, model ids, or limits.
 
 Whether Drex is the user's default decision provider is decided by the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider at runtime. Keeping the existing provider path behind an explicit configuration switch is allowed.
 
@@ -49,10 +49,10 @@ Start every helper on a cheaper, faster model, and name that model explicitly wh
 Counting must be mechanical, so two scans of the same code give the same number.
 
 - **One site is one decision function:** the function or method whose return value is the judgment, meaning a label, a yes or no, a pick from a set, or an ordered level.
-- When a judgment passes through several functions, the site is the function that contains the model call, Drex call, or rule. If one of them is on the candidate list, use that one.
+- When a judgment passes through several functions, the site is the function that contains the model call, Drex call, or rule, even when a caller is the one on the candidate list.
 - Its callers, prompt, schema, parser, and settings are extra pointers on the same line, not new sites. Parsing the model's reply, for example a PASS or FAIL string, is part of the same site.
 - The same judgment in two different functions is two sites only when each function makes its own model call, Drex call, or rule, because each one migrates separately. A function that gets the judgment by calling another site is a caller, not a site.
-- One model call that returns several judgments at once is one site. Name the judgments in its note.
+- One model call that returns several judgments at once is one site. Give the shape of the judgment the code acts on first, and name the others in the note.
 - In scope: production code and evaluation code. Out of scope: tests, fixtures, notebooks, generated code, and vendored code.
 - Out of scope: text generation, chat, summarization, embeddings, and fixed logic such as thresholds on measured numbers (lengths, counts, scores), schema checks, and exact lookups. A keyword list or pattern matched against free text to guess what it means is a site, not fixed logic.
 - Functions with no callers are not counted. Mention them in a separate note. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
@@ -62,7 +62,7 @@ Counting must be mechanical, so two scans of the same code give the same number.
 Use the first status that is true. Use only these four. The headline lists them in a different, fixed order.
 
 1. **implemented now:** this session changed the site to Drex and verified it.
-2. **already on Drex:** Drex runs on the default path, all the way from the product's entry point. The default path is what runs with no environment variables, flags, or settings files changed from the code's own defaults.
+2. **already on Drex:** Drex runs on the default path, all the way from the product's entry point. The default path is what runs with the code's own default values, ignoring environment variables, flags, settings files, and deployment configuration.
 3. **partial:** Drex code exists for this site, but it is off by default, behind a flag or setting, one of several paths, or the default only inside a path that is itself not the default.
 4. **candidate:** no Drex code exists for this site.
 
@@ -88,7 +88,7 @@ Your repo has been scanned. Identified 23 sites of drexification (5 already on D
 - Write every pointer as a full path from the repository root, even when it repeats a heading. Do not shorten with `...`, brace groups, or bare filenames.
 - Counts must match the list, including zeros.
 - After the list, add a coverage line: how many candidate functions were checked, and which parts of the repository were read in depth or only sampled.
-- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, under a heading on its own line that starts with `Not counted`, for example `## Not counted`. `check` verifies pointers there but does not count them. The section ends at the next heading of the same or a higher level, so its subheadings stay uncounted. Put the implementation plan after the list under a heading that starts with `Plan`, which is not counted either.
+- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, under a heading on its own line that starts with `Not counted`, for example `## Not counted`. `check` verifies pointers there but does not count them. The section ends at the next heading of the same or a higher level, so its subheadings stay uncounted. Put the implementation plan after the list under a heading with the word `Plan` in it, such as `## Plan` or `## Implementation plan`, which is not counted either.
 - Mark a site implemented only when it was changed and verified in this session. Never report planned work as done.
 - If the user or repository requires another report format, put the summary inside that format instead of replacing it.
 - For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.

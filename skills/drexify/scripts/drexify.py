@@ -510,7 +510,7 @@ def resolve(raw, line, files, by_suffix, count):
     return matches[0], None
 
 
-UNCOUNTED_SECTIONS = ("not counted", "plan")
+UNCOUNTED = re.compile(r"^not counted|\bplan\b")
 
 
 def heading_level(heading):
@@ -519,7 +519,7 @@ def heading_level(heading):
 
 def is_not_counted(heading):
     title = (heading.group("md") or heading.group("bold")).strip().rstrip(":").strip().lower()
-    return title.startswith(UNCOUNTED_SECTIONS)
+    return UNCOUNTED.search(title) is not None
 
 
 def site_start(repo, rel, line, cache):
