@@ -40,7 +40,8 @@ MAX_BYTES = 1_000_000
 MAX_LINES_PER_FILE = 8
 FUNCTIONS_PER_HELPER = 175
 MAX_GROUPS = 8
-HEADING = re.compile(r"^\s*(?:#{1,6}\s+(?P<md>.+)|\*\*(?P<bold>[^*]+)\*\*:?\s*)$")
+HEADING = re.compile(r"^\s*(?:(?P<hashes>#{1,6})\s+(?P<md>.+)|\*\*(?P<bold>[^*]+)\*\*:?\s*)$")
+PROGRESS_EVERY = 2000
 DECISION_WORDS = (r"classif|categori|route|router|intent|rerank|relevan|judge|grade|verif|match|select|detect|triage|"
                   r"adjudicat|decide|label")
 DECISION_NAME = re.compile(DECISION_WORDS, re.I)
@@ -343,6 +344,8 @@ def scan(repo, include_tests=False, groups=None):
 
     for rel, text in read_scannable(repo, rels):
         scanned += 1
+        if scanned % PROGRESS_EVERY == 0:
+            print(f"scanned {scanned} of {len(rels)} files", file=sys.stderr, flush=True)
         if not ANY_SIGNAL.search(text):
             continue
         found = line_hits(text)
@@ -510,6 +513,10 @@ def resolve(raw, line, files, by_suffix, count):
 UNCOUNTED_SECTIONS = ("not counted", "plan")
 
 
+def heading_level(heading):
+    return len(heading.group("hashes")) if heading.group("hashes") else 7
+
+
 def is_not_counted(heading):
     title = (heading.group("md") or heading.group("bold")).strip().rstrip(":").strip().lower()
     return title.startswith(UNCOUNTED_SECTIONS)
@@ -575,15 +582,19 @@ def check(report_path, repo, fix=False):
     tally = {s: 0 for s in STATUSES}
     seen, spans_cache = {}, {}
     sites = 0
-    counted = True
+    uncounted_level = None
     for index, line in enumerate(lines):
         number = index + 1
         heading = HEADING.match(line)
         if heading:
-            counted = not is_not_counted(heading)
+            level = heading_level(heading)
+            if uncounted_level is not None and level <= uncounted_level:
+                uncounted_level = None
+            if uncounted_level is None and is_not_counted(heading):
+                uncounted_level = level
             continue
         site = SITE.match(line)
-        if not site or not counted:
+        if not site or uncounted_level is not None:
             continue
         rest = site.group("rest").strip().lower()
         status = next((s for s in STATUSES if rest.startswith(s.lower())), None)

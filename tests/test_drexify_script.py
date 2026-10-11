@@ -282,7 +282,8 @@ class DrexifyScriptTests(unittest.TestCase):
             "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
             "- Route (`services/search/app/route.py:1`): candidate.\n\n## Not counted\n\n"
             "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n"
-            "\n## Plan\n\n- Step one (`services/billing/app/match.py:3`): candidate first.\n")
+            "\n## Plan\n\n### Steps\n\n- Step one (`services/billing/app/match.py:3`): candidate first.\n"
+            "**Order**\n- Step two (`services/billing/app/match.py:3`): candidate next.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
         mixed = path.read_text().replace("## Not counted", "## Billing (2 sites, 1 not counted)")
         self.assertTrue(any("status must start with" in p for p in drexify.check(self.report(mixed), self.repo)["problems"]))
