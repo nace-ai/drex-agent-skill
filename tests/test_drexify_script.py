@@ -284,13 +284,34 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual(result["problems"], [])
         self.assertIn("route.py:1`):\n  candidate", path.read_text())
 
+    def test_fenced_site_lines_are_not_counted(self):
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Route (`services/search/app/route.py:1`): candidate.\n\n"
+                           "```text\n- Copy (`services/search/app/route.py:1`): candidate.\n```\n")
+        self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+
+    def test_constants_need_a_real_assignment_and_reach_one_line_functions(self):
+        cases = {
+            "kwarg.py": ("import re\nP = compile_all(\n    flags=re.compile('x'),\n)\n\n"
+                         "def classify(flags):\n    return flags\n", []),
+            "oneline.py": ("import re\nRX = re.compile('x')\n\ndef classify_kind(t): return RX.match(t)\n",
+                           ["classify_kind"]),
+            "Field.java": ("class A {\n  private static final Pattern RX = Pattern.compile(\"x\");\n"
+                           "  String classifyKind(String t) {\n    return RX.matcher(t).find() ? \"a\" : \"b\";\n  }\n}\n",
+                           ["classifyKind"]),
+        }
+        for name, (text, expected) in cases.items():
+            spans, _ = drexify.file_spans(name, text)
+            found = drexify.line_hits(text)
+            got = [f["name"] for f in drexify.candidate_functions(spans, found, text.splitlines())]
+            self.assertEqual(got, expected, name)
+
     def test_check_accepts_range_pointers(self):
         path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Route (`services/search/app/route.py:1-2`): candidate.\n")
         self.assertEqual(drexify.check(path, self.repo, fix=True)["problems"], [])
 
     def test_check_keeps_pointers_where_function_ends_are_unknown(self):
         (self.repo / "services/search/app/rules.rb").write_text(
-            "def first(x)\n  x\nend\n\nclass Router\n  def pick(q)\n    q\n  end\nend\n")
+            "def first(x)\n  x\nend\n\nclass Router\n  def pick(q)\n    h = {a: 1}\n    q\n  end\nend\n")
         (self.repo / "services/search/app/tail.py").write_text(
             "def first(q):\n    return call(\n        q,\n    )\n\n\ndef second(q):\n    return q\n")
         for ptr, expected in (("rules.rb:5", "rules.rb:5"), ("tail.py:4", "tail.py:1")):

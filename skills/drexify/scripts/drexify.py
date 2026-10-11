@@ -68,8 +68,8 @@ FUNC_START = re.compile(
 CALL_NAME = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
 CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
-ASSIGNED = re.compile(r"^\s*(?:(?:export|const|let|var|final|static|private|public|protected|readonly|pub)\s+)*"
-                      r"([A-Za-z_]\w*)\s*(?::[^=]+)?:?=(?!=)")
+ASSIGNED = re.compile(r"^(?P<indent>\s*)(?:(?:export|const|let|var|final|static|private|public|protected|readonly|pub)\s+)*"
+                      r"(?:[A-Za-z_][\w.]*(?:<[^=]*>)?(?:\[\])*\s+)?([A-Za-z_]\w*)\s*(?::[^=]+)?:?=(?!=)")
 DEF_NAME = re.compile(r"\b(?:def|function|func|fn|fun)\s+(\w+)")
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
@@ -224,7 +224,7 @@ def generic_spans(lines):
             if opened and depth <= 0:
                 end = i + 1
                 break
-            if not opened and i - line > 8:
+            if not opened and (i - line > 8 or i + 1 >= limit):
                 break
         end = end or limit
         body = "\n".join(lines[line - 1:end])
@@ -273,10 +273,12 @@ def file_constants(lines, found, spans):
         rule = set(kinds) & CONSTANT_KINDS
         if not rule or owner_of(spans, number):
             continue
+        hit_indent = len(lines[number - 1]) - len(lines[number - 1].lstrip())
         for back in range(number, max(0, number - 4), -1):
             match = ASSIGNED.match(lines[back - 1])
-            if match:
-                constants.setdefault(match.group(1), set()).update(rule)
+            if match and not lines[back - 1].rstrip().endswith(",") and len(match.group("indent")) <= 4 \
+                    and (back == number or len(match.group("indent")) < hit_indent):
+                constants.setdefault(match.group(2), set()).update(rule)
                 break
     return constants
 
@@ -296,7 +298,7 @@ def by_function(spans, found, lines):
     if constants:
         uses = re.compile(r"\b(" + "|".join(map(re.escape, constants)) + r")\b")
         for start, end, name, _ in spans:
-            used = set(uses.findall("\n".join(lines[start:end])))
+            used = set(uses.findall("\n".join(lines[start - 1:end])))
             if used:
                 grouped.setdefault((start, name), set()).update(*(constants[u] for u in used))
     calls = {(s[0], s[2]): s[3] for s in spans}
@@ -563,11 +565,13 @@ def is_not_counted(heading):
     return UNCOUNTED.search(title) is not None
 
 
-def closed_span(lines, start, parsed, rel):
-    """True when the function's end is known: parsed Python, or a body opened with a brace."""
+def closed_span(spans, lines, start, parsed, rel):
+    """True when the function's end is known: parsed Python, or a body opened with a brace before the next
+    function starts."""
     if rel.endswith(".py"):
         return parsed
-    head = "\n".join(STRING_OR_COMMENT.sub("", l) for l in lines[start - 1:start + 9])
+    next_start = min((s[0] for s in spans if s[0] > start), default=len(lines) + 1)
+    head = "\n".join(STRING_OR_COMMENT.sub("", l) for l in lines[start - 1:min(start + 9, next_start - 1)])
     return "{" in head
 
 
@@ -590,7 +594,7 @@ def site_start(repo, rel, line, cache):
         return not text or text.startswith(("@", "#", "//", "/*", "*"))
 
     owner = owner_of(spans, line)
-    if owner and closed_span(lines, owner[0], parsed, rel):
+    if owner and closed_span(spans, lines, owner[0], parsed, rel):
         return owner[0], None
     if 1 <= line <= len(lines) and preamble(line - 1):
         below = [s[0] for s in spans if s[0] > line]
@@ -640,7 +644,9 @@ def check(report_path, repo, fix=False):
         if FENCE.match(line):
             fenced = not fenced
             continue
-        heading = None if fenced else HEADING.match(line)
+        if fenced:
+            continue
+        heading = HEADING.match(line)
         if heading and index < headline_at:
             continue
         if heading:
