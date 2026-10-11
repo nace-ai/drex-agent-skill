@@ -217,21 +217,3 @@ To run the open-source [Drex](https://github.com/nace-ai/drex-decision-models) m
    > For System One decisions, use my self-hosted Drex at http://127.0.0.1:8000. Do not fall back to hosted Drex.
 
 Self-hosted requests use the same `POST /v1/systemone` format as the hosted API, with no `Authorization` header. The bundled helper only talks to hosted Drex, so your agent uses an ordinary HTTP client for your server. Keep the server on `127.0.0.1` unless you add authentication in front of it, and never send a hosted API key to it. See the repository for hardware requirements and license terms.
-
-## Upgrade from the single drex skill
-
-Version 0.5.0 renames the `drex` skill to `drex-for-harness` and adds `drexify`. A link or install that still points at `skills/drex` stops loading after you update.
-
-- **Claude Code and Pi:** update the plugin or package as usual. Both skills come with it.
-- **Linked installs** (OpenCode, Cursor, Windsurf, Cline, DeepSeek Harness, other harnesses): pull the checkout, remove the old link, and add both new links. For Cursor:
-
-  ```bash
-  git -C "$HOME/drex-agent-skill" pull
-  rm ~/.cursor/skills/drex
-  ln -s "$HOME/drex-agent-skill/skills/drex-for-harness" ~/.cursor/skills/drex-for-harness
-  ln -s "$HOME/drex-agent-skill/skills/drexify" ~/.cursor/skills/drexify
-  ```
-
-- **Native installers** (Hermes, Codex, Gemini CLI, GitHub Copilot, OpenClaw): remove the old `drex` skill with the agent's own command, then install both skills as shown above.
-
-Restart your agent after upgrading.

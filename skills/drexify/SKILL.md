@@ -21,36 +21,71 @@ This skill decides where Drex fits. The `drex-for-harness` skill covers how to c
 
 Whether Drex is the user's default decision provider is decided by the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider at runtime. Keeping the existing provider path behind an explicit configuration switch is allowed.
 
+## The bundled script
+
+`scripts/drexify.py` sits next to this file. Resolve it relative to the real location of this SKILL.md, not the current directory. It needs Python 3.9+, uses only the standard library, reads files, and never calls a model or the network.
+
+- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N>` searches the whole repository once for decision signals in a few seconds. It prints a short map of areas and N balanced groups of areas.
+- Add `--group <K>` to print the file list for group K only, or `--area <name>` for one area.
+- `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites shortened paths that match exactly one file.
+
+If the script is missing or cannot run, do the same steps by hand.
+
 ## Scan the repository
 
-Map every decision site in scope before changing code.
+1. **Map.** Run `scan` once. Its signals are model calls and model library imports, existing Drex calls, rerankers, fuzzy matching, and decision-named functions that use label sets, regexes, or model wrappers. Treat the list as a starting point, not the full inventory.
+2. **Split when it pays.** With three or more areas and helpers available, give each helper one group: tell it to run `scan --groups <N> --group <K>` with the same N, and to search or read only inside its group's folders. With one or two areas, scan alone, because one agent is cheaper.
+3. **Read narrowly.** Open only the lines around each hit, enough to see the decision function, its inputs, and its outputs. Also look nearby for keyword lists or hand-tuned rules that guess what text means, which the scan can miss.
+4. **Record each site** as one line in the format below. Helpers return these lines only, not prose.
+5. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write files, run `check` without `--fix` and apply its fixes in the report yourself.
 
-1. **Inventory.** Within the user's scope, find semantic decisions: model calls whose output is a label, boolean, pick-one-of-N, ranking, or level. Include heuristic or keyword classifiers that guess what text means, rerankers and relevance filters, verification of extracted values, and existing Drex calls. Skip text generation, chat, summarization, embeddings, and deterministic logic such as thresholds on measured numbers, schema checks, and exact lookups.
-2. **Record each site.** Plain-language process name, a verified `path:line` pointer with the full repository-relative path, the current mechanism, the Drex shape, fit, deployment constraints, and status: already on Drex, partial (a Drex path exists but is opt-in or not the default), candidate, or implemented in this session. Count one entry per distinct judgment. When several call sites make the same judgment, list their pointers under one entry.
-   - Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level.
-   - A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
-3. **Verify pointers.** Open each file and confirm the line sits inside the function or class that makes the decision. Drop or fix any pointer that does not resolve. Write every pointer as a full path from the repository root, even when it repeats a heading or a neighbouring row. Do not shorten with `...`, brace groups, or bare filenames, so each pointer can be checked mechanically.
+Run helpers on a cheaper, faster model when the agent offers a choice. Keep the strongest model for merging, judging fit, and writing the plan.
 
-### Work fast
+## What counts as one site
 
-- **Search before reading.** Start with text searches for decision signals, then open files only around the hits. Useful signals: model client calls that ask for a label, a yes or no, or JSON with a fixed set of values. Words like classify, categorize, route, intent, rerank, relevance, judge, grade, verify, match, and select. Enums or literal label lists passed to a model. Existing Drex calls (`systemone`, `drex`). Skip vendored code, build output, and data folders.
-- **Split large scans without overlap.** When the repository has several services or packages and the agent can run helpers in parallel, do the shared work once: map the top-level layout and run the signal searches across the whole repository a single time. Group the hits by area so no two groups share a folder. Code used by several areas belongs to one group only. Give each helper only its folders, its hit list, the inventory rules, and the record format. A helper may search inside its own folders, but not outside them. Helpers return one short record per site, not prose. Merge the records, remove duplicates, then check every pointer mechanically (the file exists and the line is in range). Rewrite any shortened path to its full path, and fix or drop any pointer that fails, before reporting. Skip the split when the repository has only one or two main areas, because one agent is cheaper.
-- **Keep helpers cheap.** Run helpers on a cheaper, faster model when the agent offers a choice, and keep the strongest model for merging, judging fit, and writing the plan. Helpers should read only the lines around each hit, not whole files, so their context stays small.
+Counting must be mechanical, so two scans of the same code give the same number.
+
+- **One site is one decision function:** the function or method whose return value is the judgment, meaning a label, a yes or no, a pick from a set, or an ordered level.
+- Its callers, prompt, schema, parser, and settings are extra pointers on the same line, not new sites.
+- The same judgment in two different functions is two sites, because each one migrates separately.
+- One model call that returns several judgments at once is one site. Name the judgments in its note.
+- In scope: production code and evaluation code. Out of scope: tests, fixtures, notebooks, generated code, and vendored code.
+- Out of scope: text generation, chat, summarization, embeddings, and fixed logic such as thresholds on measured numbers, schema checks, and exact lookups.
+- Functions with no callers are not counted. Mention them in a separate note.
+
+## Pick the status
+
+Use the first status that is true. Use only these four.
+
+1. **implemented now:** this session changed the site to Drex and verified it.
+2. **already on Drex:** Drex runs on the default path with default settings.
+3. **partial:** Drex code exists for this site, but it is off by default, behind a flag or setting, or one of several paths.
+4. **candidate:** no Drex code exists for this site.
+
+Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level. A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
 
 ## Report the summary
 
-Lead with a whole-repo summary, then list the processes grouped by product area or workflow:
+Write the headline with all four counts in this order, then one line per site grouped by product area:
 
 ```text
 Your repo has been scanned. Identified 23 sites of drexification (5 already on Drex, 3 partial, 2 implemented now, 13 candidates). Below is the list of processes:
 
-- Document splitting (`src/ingest/split.py:42`): already on Drex.
+- Document splitting (`src/ingest/split.py:42`): already on Drex, choice over document types.
 - Document classification (`src/ingest/classify.py:88`): implemented now, choice over 11 section types, behind `USE_DREX_CLASSIFY`.
-- Template selection for the task (`src/tasks/templates.py:51`): candidate, choice over template ids.
+- Search passage filter (`src/search/filter.py:64`): partial, noul per passage, Drex only when `DREX_URL` is set.
+- Template selection for the task (`src/tasks/templates.py:51`): candidate, choice over template ids, also `src/tasks/api.py:30`.
 - Audit policy identification (`src/policy/match.py:120`): candidate, noul per policy.
 ```
 
-Counts must match the list, and every status must appear in the headline. Use only the four statuses above. Put anything else, such as dead code or sites that should stay deterministic, in a separate note outside the counts. State which parts of the repository were read in depth and which were only sampled, so the reader knows how complete the list is. Mark a site implemented only when it was changed and verified in this session. Never report planned work as done. If the user or repository requires another report format, put the summary inside that format instead of replacing it. For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
+- Each site line is `- <process> (`<path:line>`): <status>, <shape>, <short note>.` The pointer is the decision function.
+- Write every pointer as a full path from the repository root, even when it repeats a heading. Do not shorten with `...`, brace groups, or bare filenames.
+- Counts must match the list, including zeros.
+- After the list, state which parts of the repository were read in depth and which were only sampled.
+- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, in a separate note outside the counts.
+- Mark a site implemented only when it was changed and verified in this session. Never report planned work as done.
+- If the user or repository requires another report format, put the summary inside that format instead of replacing it.
+- For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
 
 ## Pace the work
 
@@ -65,6 +100,6 @@ Counts must match the list, and every status must appear in the headline. Use on
 1. Design the questions with `drex-for-harness`. Keep the current mechanism's labels or outputs so callers do not change.
 2. Put the new path behind the repository's configuration mechanism unless the user asks for a direct switch.
 3. Compare Drex against the current mechanism on representative examples before recommending a default. Report accuracy, latency, and cost only from runs that actually happened.
-4. Update the site's status in the summary and report what was changed and tested.
+4. Update the site's status in the summary, rerun `check`, and report what was changed and tested.
 
 Do not change production routing, credentials, or unrelated code without authorization.

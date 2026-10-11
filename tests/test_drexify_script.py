@@ -1,0 +1,138 @@
+"""Offline tests for skills/drexify/scripts/drexify.py. No git, network, or model calls required."""
+import importlib.util
+import io
+import json
+from contextlib import redirect_stdout
+from pathlib import Path
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "skills" / "drexify" / "scripts" / "drexify.py"
+_spec = importlib.util.spec_from_file_location("drexify_under_test", SCRIPT)
+drexify = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(drexify)
+
+FILES = {
+    "services/billing/app/match.py": "import openai\n\ndef match_contract(x):\n    return client.chat.completions.create(model='m')\n",
+    "services/search/app/route.py": "def route_query(q):\n    return 'fact'\n",
+    "services/search/app/drex_call.py": "URL = 'https://drex.nace.ai/v1/systemone'\n",
+    "shared/core/a/classify.py": "from typing import Literal\nLabel = Literal['a', 'b']\n\ndef classify_doc(t):\n    pass\n",
+    "shared/core/b/classify.py": "def classify_page(t):\n    pass\n",
+    "services/billing/tests/test_match.py": "def match_contract_test():\n    client.chat.completions.create(model='m')\n",
+    "node_modules/pkg/index.js": "function classifyThing() {}\n",
+    "README.md": "classify everything\n",
+}
+
+
+class DrexifyScriptTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="drexify test ")
+        self.repo = Path(self.tmp.name) / "repo"
+        for rel, text in FILES.items():
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def report(self, body):
+        path = Path(self.tmp.name) / "report.md"
+        path.write_text(body)
+        return path
+
+    def test_scan_groups_by_area_and_skips_tests_and_vendored(self):
+        result = drexify.scan(self.repo)
+        self.assertEqual(set(result["areas"]), {"services/billing", "services/search", "shared"})
+        paths = {f["path"] for a in result["areas"].values() for f in a["files"]}
+        self.assertNotIn("services/billing/tests/test_match.py", paths)
+        self.assertFalse(any(p.startswith("node_modules") for p in paths))
+        match = next(f for f in result["areas"]["services/billing"]["files"] if f["path"].endswith("match.py"))
+        self.assertEqual(match["kinds"], ["decision-name", "model-call", "model-import"])
+        drex = next(f for f in result["areas"]["services/search"]["files"] if f["path"].endswith("drex_call.py"))
+        self.assertEqual(drex["kinds"], ["drex"])
+        self.assertIn("services/billing/tests/test_match.py",
+                      {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]})
+
+    def test_scan_balanced_groups_cover_every_area_once(self):
+        groups = drexify.scan(self.repo, groups=2)["groups"]
+        names = [a for g in groups for a in g["areas"]]
+        self.assertEqual(sorted(names), sorted(set(names)))
+        self.assertEqual(set(names), {"services/billing", "services/search", "shared"})
+
+    def test_check_accepts_a_clean_report(self):
+        path = self.report(
+            "Your repo has been scanned. Identified 2 sites of drexification "
+            "(1 already on Drex, 0 partial, 0 implemented now, 1 candidates). Below is the list of processes:\n\n"
+            "- Search Drex call (`services/search/app/drex_call.py:1`): already on Drex.\n"
+            "- Contract matching (`services/billing/app/match.py:3`): candidate, choice over contracts.\n")
+        result = drexify.check(path, self.repo)
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["statuses"]["candidate"], 1)
+
+    def test_check_fixes_shortened_paths_only_with_fix(self):
+        body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                "- Contract matching (`.../app/match.py:3`): candidate.\n")
+        path = self.report(body)
+        self.assertTrue(any("run with --fix" in p for p in drexify.check(path, self.repo)["problems"]))
+        self.assertEqual(path.read_text(), body)
+        result = drexify.check(path, self.repo, fix=True)
+        self.assertEqual(result["problems"], [])
+        self.assertIn("`services/billing/app/match.py:3`", path.read_text())
+
+    def test_check_uses_line_number_to_break_ties(self):
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                           "- Doc classify (`classify.py:4`): candidate.\n")
+        result = drexify.check(path, self.repo, fix=True)
+        self.assertEqual(result["problems"], [])
+        self.assertIn("`shared/core/a/classify.py:4`", path.read_text())
+
+    def test_check_reports_bad_pointers_statuses_and_counts(self):
+        path = self.report(
+            "Identified 3 sites of drexification (1 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+            "- Ambiguous (`classify.py:1`): candidate.\n"
+            "- Missing (`services/none.py:1`): candidate.\n"
+            "- Too far (`services/search/app/route.py:99`): candidate.\n"
+            "- Made-up status (`services/search/app/route.py:1`): dormant.\n"
+            "- Braces (`shared/core/{a,b}/classify.py:1`): candidate.\n"
+            "- Ambiguous again (`classify.py:1`): candidate.\n")
+        problems = "\n".join(drexify.check(path, self.repo)["problems"])
+        for expected in ("ambiguous, matches 2 files", "no such file", "past the end", "status must start with",
+                         "brace groups", "headline total 3 does not equal", "the list has 5", "already listed on line"):
+            self.assertIn(expected, problems)
+
+    def test_check_requires_headline(self):
+        path = self.report("- Contract matching (`services/billing/app/match.py:3`): candidate.\n")
+        self.assertTrue(any("headline not found" in p for p in drexify.check(path, self.repo)["problems"]))
+
+    def test_skill_example_report_passes_the_checker_format(self):
+        skill = (ROOT / "skills" / "drexify" / "SKILL.md").read_text()
+        example = skill.split("```text\n", 1)[1].split("```", 1)[0]
+        total, on, part, done, cand = map(int, drexify.HEADLINE.search(example).groups())
+        tally = {s: 0 for s in drexify.STATUSES}
+        for line in example.splitlines():
+            site = drexify.SITE.match(line)
+            if site:
+                rest = site.group("rest").lower()
+                tally[next(s for s in drexify.STATUSES if rest.startswith(s.lower()))] += 1
+        self.assertEqual(sum(tally.values()), 5)
+        self.assertEqual(on + part + done + cand, total)
+        self.assertEqual(set(k for k, v in tally.items() if v), set(drexify.STATUSES))
+
+    def test_cli_exit_codes_and_json(self):
+        good = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                           "- Route (`services/search/app/route.py:1`): candidate.\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = drexify.main(["check", str(good), "--repo", str(self.repo), "--json"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())["sites"], 1)
+        good.write_text(good.read_text().replace("route.py:1", "route.py:50"))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(drexify.main(["check", str(good), "--repo", str(self.repo)]), 1)
+            self.assertEqual(drexify.main(["scan", "--repo", str(self.repo), "--groups", "2"]), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

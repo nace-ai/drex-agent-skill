@@ -131,31 +131,23 @@ class PluginTests(unittest.TestCase):
         self.assertIn("## Call Drex", skill)
         self.assertIn("`drexify`", skill)
         drexify = skills[1].read_text()
-        for heading in ("## Use with drex-for-harness", "## Scan the repository", "## Report the summary",
+        for heading in ("## Use with drex-for-harness", "## The bundled script", "## Scan the repository",
+                        "## What counts as one site", "## Pick the status", "## Report the summary",
                         "## Pace the work", "## Implement one site"):
             self.assertIn(heading, drexify)
-        self.assertIn("Your repo has been scanned.", drexify)
-        self.assertIn("Counts must match the list", drexify)
-        self.assertIn("3 partial", drexify)  # headline example covers every status
-        self.assertIn("full repository-relative path", drexify)
-        self.assertIn("only sampled", drexify)
-        self.assertIn("Use only the four statuses above.", drexify)
-        self.assertIn("**Search before reading.**", drexify)
-        self.assertIn("**Split large scans without overlap.**", drexify)
-        self.assertIn("run the signal searches across the whole repository a single time", drexify)
-        self.assertIn("**Keep helpers cheap.**", drexify)
-        self.assertIn("Rewrite any shortened path to its full path", drexify)
-        self.assertIn("Do not shorten with `...`", drexify)
-        self.assertIn("plan mode", drexify)
-        self.assertIn("activities, not workflow code", drexify)
+        for phrase in ("**One site is one decision function:**", "Use the first status that is true. Use only these four.",
+                       "scan --repo <root> --groups <N>", "check <report> --repo <root> --fix",
+                       "Do not shorten with `...`", "Counts must match the list, including zeros.", "only sampled",
+                       "cheaper, faster model", "With one or two areas, scan alone", "plan mode",
+                       "activities, not workflow code", "If the script is missing or cannot run"):
+            self.assertIn(phrase, drexify)
+        self.assertTrue((ROOT / "skills/drexify/scripts/drexify.py").is_file())
         self.assertNotIn("## Call Drex", drexify)  # API contract lives in drex-for-harness only
         self.assertIsNone(re.search(r"claude|user_config|plugin", drexify, re.I))  # agent-agnostic
         readme = (ROOT / "README.md").read_text()
         self.assertTrue(readme.startswith("# Drex for coding agents\n"))
         self.assertIn("## Skills\n", readme)
-        self.assertIn("## Upgrade from the single drex skill\n", readme)
-        install_steps = readme.split("## Upgrade from the single drex skill\n", 1)[0]
-        self.assertIsNone(re.search(r"skills/drex(?![-\w])", install_steps))  # old path only in upgrade notes
+        self.assertIsNone(re.search(r"skills/drex(?![-\w])", readme))  # no old single-skill path
         self.assertIn("drex.nace.ai/login", readme)
         self.assertIn("export DREX_API_KEY='paste-your-key-here'", readme)
         self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skill", readme)
