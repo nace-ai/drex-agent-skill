@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from contextlib import redirect_stdout
+from unittest import mock
 from pathlib import Path
 import tempfile
 import unittest
@@ -81,12 +82,45 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual(result["problems"], [])
         self.assertIn("`services/billing/app/match.py:3`", path.read_text())
 
-    def test_check_uses_line_number_to_break_ties(self):
-        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
-                           "- Doc classify (`classify.py:4`): candidate.\n")
+    def test_check_never_guesses_between_files_with_the_same_name(self):
+        body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                "- Doc classify (`classify.py:4`): candidate.\n")
+        path = self.report(body)
         result = drexify.check(path, self.repo, fix=True)
-        self.assertEqual(result["problems"], [])
-        self.assertIn("`shared/core/a/classify.py:4`", path.read_text())
+        self.assertTrue(any("ambiguous, matches 2 files" in p for p in result["problems"]))
+        self.assertEqual(path.read_text(), body)
+
+    def test_check_rejects_site_pointers_without_a_line(self):
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                           "- Route (`services/search/app/route.py`): candidate.\n")
+        self.assertTrue(any("must be a full `path:line`" in p for p in drexify.check(path, self.repo)["problems"]))
+
+    def test_check_ignores_hosts_versions_and_urls_in_notes(self):
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                           "- Route (`services/search/app/route.py:1`): candidate, server at `127.0.0.1:8000`, "
+                           "`api.example.com:443`, `v1.2:3`.\n")
+        self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+
+    def test_check_reads_stdin_without_writing(self):
+        body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                "- Contract matching (`.../app/match.py:3`): candidate.\n")
+        with mock.patch.object(drexify.sys, "stdin", io.StringIO(body)):
+            result = drexify.check("-", self.repo, fix=True)
+        self.assertEqual(result["pointers_fixed"], [])
+        self.assertTrue(any("services/billing/app/match.py" in p for p in result["problems"]))
+
+    def test_check_round_trips_utf8_reports(self):
+        body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                "- Сопоставление контрактов ✓ (`.../app/match.py:3`): candidate, naïve café.\n")
+        path = self.report(body)
+        self.assertEqual(drexify.check(path, self.repo, fix=True)["problems"], [])
+        self.assertIn("Сопоставление контрактов ✓ (`services/billing/app/match.py:3`)", path.read_text(encoding="utf-8"))
+
+    def test_files_directly_in_a_split_folder_get_their_own_area(self):
+        (self.repo / "services/top.py").write_text("client.chat.completions.create(model='m')\n")
+        areas = drexify.scan(self.repo)["areas"]
+        self.assertIn("services/*", areas)
+        self.assertEqual([f["path"] for f in areas["services/*"]["files"]], ["services/top.py"])
 
     def test_check_reports_bad_pointers_statuses_and_counts(self):
         path = self.report(

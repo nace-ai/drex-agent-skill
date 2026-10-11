@@ -19,9 +19,11 @@ HEADLINE = re.compile(
     r"(\d+) implemented now, (\d+) candidates?\)"
 )
 SITE = re.compile(r"^\s*[-*]\s+(?P<name>.+?)\s+\(`(?P<ptr>[^`]+)`\):\s*(?P<rest>.*)$")
-POINTER = re.compile(r"`(?P<path>[^`\s]+?\.[A-Za-z0-9]+):(?P<line>\d+)(?P<tail>(?:[-,:]\d+)*)`")
-
 CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
+POINTER_EXT = CODE_EXT | {".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql", ".sh", ".html", ".css", ".ini", ".cfg", ".txt",
+                          ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".vue", ".svelte", ".ipynb"}
+POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<line>\d+)(?P<tail>(?:[-,:]\d+)*)`")
+SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks__"}
@@ -49,10 +51,13 @@ SIGNALS = (
 )
 
 
+ANY_SIGNAL = re.compile("|".join(f"(?:{pattern.pattern})" for _, pattern in SIGNALS), re.I | re.M)
+
+
 def list_files(repo):
     try:
         out = subprocess.run(["git", "-C", str(repo), "ls-files", "-co", "--exclude-standard", "-z"],
-                             capture_output=True, text=True, timeout=60, check=True).stdout
+                             capture_output=True, timeout=60, check=True).stdout.decode("utf-8", "replace")
         files = [f for f in out.split("\0") if f]
         if files:
             return files
@@ -62,7 +67,7 @@ def list_files(repo):
     for root, dirs, names in os.walk(repo):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         rel = Path(root).relative_to(repo)
-        files.extend(str(rel / n) if str(rel) != "." else n for n in names)
+        files.extend((rel / n).as_posix() if str(rel) != "." else n for n in names)
     return files
 
 
@@ -91,8 +96,11 @@ def assign_areas(paths):
     areas = {}
     for p in paths:
         parts = Path(p).parts
-        if len(parts) > 2 and len(children.get(parts[0], ())) >= 2:
+        split = len(children.get(parts[0], ())) >= 2
+        if len(parts) > 2 and split:
             areas[p] = f"{parts[0]}/{parts[1]}"
+        elif len(parts) == 2 and split:
+            areas[p] = f"{parts[0]}/*"
         else:
             areas[p] = parts[0] if len(parts) > 1 else "."
     return areas
@@ -110,10 +118,12 @@ def scan(repo, include_tests=False, groups=0):
         try:
             if path.stat().st_size > MAX_BYTES:
                 continue
-            text = path.read_text(errors="ignore")
+            text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
         scanned += 1
+        if not ANY_SIGNAL.search(text):
+            continue
         found = []
         for number, line in enumerate(text.splitlines(), 1):
             kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
@@ -166,7 +176,7 @@ def line_counts(repo, files, cache):
     def count(rel):
         if rel not in cache:
             try:
-                cache[rel] = len((repo / rel).read_text(errors="ignore").splitlines())
+                cache[rel] = len((repo / rel).read_text(encoding="utf-8", errors="ignore").splitlines())
             except OSError:
                 cache[rel] = 0
         return cache[rel]
@@ -180,21 +190,20 @@ def resolve(raw, line, files, by_suffix, count):
     if "{" in raw or "}" in raw:
         return None, "brace groups cannot be checked, write each path in full"
     tail = raw.split(".../")[-1].split("…/")[-1].lstrip("./")
-    matches = [f for f in by_suffix.get(Path(tail).name, ()) if f == tail or f.endswith("/" + tail)]
-    fitting = [f for f in matches if 1 <= line <= count(f)]
-    if len(fitting) == 1:
-        return fitting[0], None
+    matches = sorted(f for f in by_suffix.get(Path(tail).name, ()) if f == tail or f.endswith("/" + tail))
     if not matches:
         return None, "no such file"
-    if not fitting:
-        return None, f"line {line} is past the end of every match"
-    return None, f"ambiguous, matches {len(fitting)} files"
+    if len(matches) > 1:
+        return None, f"ambiguous, matches {len(matches)} files: {', '.join(matches[:3])}"
+    if not 1 <= line <= count(matches[0]):
+        return None, f"line {line} is past the end of {matches[0]}"
+    return matches[0], None
 
 
 def check(report_path, repo, fix=False):
     repo = Path(repo)
-    report_path = Path(report_path)
-    text = report_path.read_text()
+    from_stdin = str(report_path) == "-"
+    text = sys.stdin.read() if from_stdin else Path(report_path).read_text(encoding="utf-8")
     files = set(list_files(repo))
     by_suffix = {}
     for f in files:
@@ -203,6 +212,8 @@ def check(report_path, repo, fix=False):
     problems, fixed = [], []
 
     def repl(match):
+        if match.group("ext").lower() not in POINTER_EXT:
+            return match.group(0)
         raw, line = match.group("path"), int(match.group("line"))
         full, problem = resolve(raw, line, files, by_suffix, count)
         if problem:
@@ -214,9 +225,9 @@ def check(report_path, repo, fix=False):
         return match.group(0)
 
     new_text = POINTER.sub(repl, text)
-    if fix and new_text != text:
-        report_path.write_text(new_text)
-    if not fix and fixed:
+    if fix and not from_stdin and new_text != text:
+        Path(report_path).write_text(new_text, encoding="utf-8")
+    if (not fix or from_stdin) and fixed:
         problems.extend(f"shortened path, run with --fix: {f}" for f in fixed)
 
     tally = {s: 0 for s in STATUSES}
@@ -234,6 +245,8 @@ def check(report_path, repo, fix=False):
         sites += 1
         tally[status] += 1
         ptr = site.group("ptr")
+        if not SITE_POINTER.match(ptr):
+            problems.append(f"line {number}: site pointer `{ptr}` must be a full `path:line`")
         if ptr in seen:
             problems.append(f"line {number}: `{ptr}` is already listed on line {seen[ptr]}")
         seen.setdefault(ptr, number)
@@ -252,7 +265,7 @@ def check(report_path, repo, fix=False):
         for status in STATUSES:
             if claimed[status] != tally[status]:
                 problems.append(f"headline says {claimed[status]} {status}, the list has {tally[status]}")
-    return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if fix else [], "problems": problems}
+    return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if fix and not from_stdin else [], "problems": problems}
 
 
 def main(argv=None):
@@ -266,7 +279,7 @@ def main(argv=None):
     s.add_argument("--area", help="print the files of one area only")
     s.add_argument("--json", action="store_true")
     c = sub.add_parser("check", help="lint a drexify report")
-    c.add_argument("report")
+    c.add_argument("report", help="report file, or - to read it from stdin (no --fix)")
     c.add_argument("--repo", default=".")
     c.add_argument("--fix", action="store_true", help="rewrite shortened paths that resolve to one file")
     c.add_argument("--json", action="store_true")

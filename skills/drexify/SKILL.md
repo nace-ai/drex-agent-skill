@@ -26,18 +26,18 @@ Whether Drex is the user's default decision provider is decided by the provider 
 `scripts/drexify.py` sits next to this file. Resolve it relative to the real location of this SKILL.md, not the current directory. It needs Python 3.9+, uses only the standard library, reads files, and never calls a model or the network.
 
 - `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N>` searches the whole repository once for decision signals in a few seconds. It prints a short map of areas and N balanced groups of areas.
-- Add `--group <K>` to print the file list for group K only, or `--area <name>` for one area.
-- `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites shortened paths that match exactly one file.
+- Add `--group <K>` to print the file list for group K only, or `--area <name>` for one area. An area ending in `/*` means only the files directly inside that folder.
+- `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites a shortened path only when it matches exactly one file. Use `-` as the report to read it from standard input without writing anything.
 
 If the script is missing or cannot run, do the same steps by hand.
 
 ## Scan the repository
 
 1. **Map.** Run `scan` once. Its signals are model calls and model library imports, existing Drex calls, rerankers, fuzzy matching, and decision-named functions that use label sets, regexes, or model wrappers. Treat the list as a starting point, not the full inventory.
-2. **Split when it pays.** With three or more areas and helpers available, give each helper one group: tell it to run `scan --groups <N> --group <K>` with the same N, and to search or read only inside its group's folders. With one or two areas, scan alone, because one agent is cheaper.
+2. **Split when it pays.** With three or more areas and helpers available, give each helper one group. Pass it the exact command `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N> --group <K>` with absolute paths and the same N, and tell it to search or read only inside its group's areas. With one or two areas, scan alone, because one agent is cheaper.
 3. **Read narrowly.** Open only the lines around each hit, enough to see the decision function, its inputs, and its outputs. Also look nearby for keyword lists or hand-tuned rules that guess what text means, which the scan can miss.
 4. **Record each site** as one line in the format below. Helpers return these lines only, not prose.
-5. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write files, run `check` without `--fix` and apply its fixes in the report yourself.
+5. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write a file, pipe the report to `check -` and apply the reported fixes yourself.
 
 Run helpers on a cheaper, faster model when the agent offers a choice. Keep the strongest model for merging, judging fit, and writing the plan.
 
