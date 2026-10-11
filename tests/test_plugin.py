@@ -143,6 +143,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn("**Search before reading.**", drexify)
         self.assertIn("**Split large scans without overlap.**", drexify)
         self.assertIn("run the signal searches across the whole repository a single time", drexify)
+        self.assertIn("**Keep helpers cheap.**", drexify)
+        self.assertIn("Rewrite any shortened path to its full path", drexify)
         self.assertIn("Do not shorten with `...`", drexify)
         self.assertIn("plan mode", drexify)
         self.assertIn("activities, not workflow code", drexify)
