@@ -139,6 +139,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn("3 partial", drexify)  # headline example covers every status
         self.assertIn("full repository-relative path", drexify)
         self.assertIn("only sampled", drexify)
+        self.assertIn("Use only the four statuses above.", drexify)
+        self.assertIn("Do not shorten with `...`", drexify)
         self.assertIn("plan mode", drexify)
         self.assertIn("activities, not workflow code", drexify)
         self.assertNotIn("## Call Drex", drexify)  # API contract lives in drex-for-harness only

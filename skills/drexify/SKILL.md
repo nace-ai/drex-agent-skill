@@ -29,7 +29,7 @@ Map every decision site in scope before changing code.
 2. **Record each site.** Plain-language process name, a verified `path:line` pointer with the full repository-relative path, the current mechanism, the Drex shape, fit, deployment constraints, and status: already on Drex, partial (a Drex path exists but is opt-in or not the default), candidate, or implemented in this session. Count one entry per distinct judgment. When several call sites make the same judgment, list their pointers under one entry.
    - Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level.
    - A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
-3. **Verify pointers.** Open each file and confirm the line sits inside the function or class that makes the decision. Drop or fix any pointer that does not resolve.
+3. **Verify pointers.** Open each file and confirm the line sits inside the function or class that makes the decision. Drop or fix any pointer that does not resolve. Write every pointer as a full path from the repository root, even when it repeats a heading or a neighbouring row. Do not shorten with `...`, brace groups, or bare filenames, so each pointer can be checked mechanically.
 
 ## Report the summary
 
@@ -44,7 +44,7 @@ Your repo has been scanned. Identified 23 sites of drexification (5 already on D
 - Audit policy identification (`src/policy/match.py:120`): candidate, noul per policy.
 ```
 
-Counts must match the list, and every status must appear in the headline. State which parts of the repository were read in depth and which were only sampled, so the reader knows how complete the list is. Mark a site implemented only when it was changed and verified in this session. Never report planned work as done. If the user or repository requires another report format, put the summary inside that format instead of replacing it. For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
+Counts must match the list, and every status must appear in the headline. Use only the four statuses above. Put anything else, such as dead code or sites that should stay deterministic, in a separate note outside the counts. State which parts of the repository were read in depth and which were only sampled, so the reader knows how complete the list is. Mark a site implemented only when it was changed and verified in this session. Never report planned work as done. If the user or repository requires another report format, put the summary inside that format instead of replacing it. For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
 
 ## Pace the work
 
