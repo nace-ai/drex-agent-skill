@@ -34,7 +34,7 @@ Map every decision site in scope before changing code.
 ### Work fast
 
 - **Search before reading.** Start with text searches for decision signals, then open files only around the hits. Useful signals: model client calls that ask for a label, a yes or no, or JSON with a fixed set of values. Words like classify, categorize, route, intent, rerank, relevance, judge, grade, verify, match, and select. Enums or literal label lists passed to a model. Existing Drex calls (`systemone`, `drex`). Skip vendored code, build output, and data folders.
-- **Split large scans.** When the repository has several services or packages and the agent can run helpers in parallel, give each helper one area with the same inventory rules and record format. Merge the results, remove duplicates, then verify pointers once before reporting.
+- **Split large scans without overlap.** When the repository has several services or packages and the agent can run helpers in parallel, do the shared work once: map the top-level layout and run the signal searches across the whole repository a single time. Group the hits by area so no two groups share a folder. Code used by several areas belongs to one group only. Give each helper only its folders, its hit list, the inventory rules, and the record format, and tell it not to search or read outside its folders. Helpers return one short record per site, not prose. Merge the records, remove duplicates, then check every pointer mechanically (the file exists and the line is in range) before reporting. For a small repository, skip the split, because one agent is cheaper.
 
 ## Report the summary
 
