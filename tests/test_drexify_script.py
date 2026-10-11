@@ -201,6 +201,25 @@ class DrexifyScriptTests(unittest.TestCase):
         spans, parsed = drexify.file_spans("x.py", "def broken(:\n    pass\n")
         self.assertFalse(parsed)
 
+    def test_heavy_areas_split_by_folder_until_they_fit(self):
+        files = [{"path": f"services/main/src/main/{d}/m{i}.py", "hits": 1, "functions": [{}]}
+                 for d in ("workflows", "app", "pipeline") for i in range(10)]
+        files.append({"path": "services/main/src/main/top.py", "hits": 1, "functions": [{}]})
+        areas = {"services/main": {"files": files, "hits": 31, "functions": 31},
+                 "shared": {"files": files[:2], "hits": 2, "functions": 2}}
+        split = drexify.split_heavy(areas, 3)
+        self.assertEqual(sorted(split), ["services/main/src/main/*", "services/main/src/main/app",
+                                         "services/main/src/main/pipeline", "services/main/src/main/workflows", "shared"])
+        self.assertEqual(sum(len(e["files"]) for e in split.values()), 33)
+
+    def test_group_printout_starts_with_totals(self):
+        out = io.StringIO()
+        result = drexify.scan(self.repo, groups=1)
+        with redirect_stdout(out):
+            drexify.print_scan(result, group=1)
+        self.assertRegex(out.getvalue().splitlines()[0],
+                         r"^# group 1: \d+ areas, \d+ files, \d+ candidate functions, \d+ files without one$")
+
     def test_suggested_groups_scale_with_candidate_functions(self):
         self.assertEqual([drexify.suggested_groups(n) for n in (0, 200, 351, 1245, 9999)], [1, 1, 2, 4, 6])
 
@@ -262,7 +281,8 @@ class DrexifyScriptTests(unittest.TestCase):
         path = self.report(
             "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
             "- Route (`services/search/app/route.py:1`): candidate.\n\n## Not counted\n\n"
-            "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n")
+            "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n"
+            "\n## Plan\n\n- Step one (`services/billing/app/match.py:3`): candidate first.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
         mixed = path.read_text().replace("## Not counted", "## Billing (2 sites, 1 not counted)")
         self.assertTrue(any("status must start with" in p for p in drexify.check(self.report(mixed), self.repo)["problems"]))

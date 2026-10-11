@@ -378,6 +378,7 @@ def scan(repo, include_tests=False, groups=None):
         functions_total += len(functions)
     head, dirty = git_state(repo)
     count = groups or suggested_groups(functions_total)
+    by_area = split_heavy(by_area, count)
     return {"schema": SCHEMA, "repo": str(repo.resolve()), "head": head, "dirty": dirty, "include_tests": include_tests,
             "python": ".".join(map(str, sys.version_info[:2])), "listed": len(listed), "scanned": scanned,
             "files_with_hits": len(hits), "candidate_functions": functions_total, "python_parse_fallbacks": fallbacks,
@@ -385,10 +386,41 @@ def scan(repo, include_tests=False, groups=None):
             "groups": make_groups(by_area, count)}
 
 
+def area_work(entry):
+    return len(entry["files"]) + entry["functions"]
+
+
+def split_heavy(by_area, groups, slack=1.2):
+    """Split any area heavier than its share of the work by the next folder level, until it fits or cannot split."""
+    out = dict(by_area)
+    target = sum(area_work(e) for e in out.values()) / max(groups, 1) * slack
+    queue = sorted(name for name, e in out.items() if area_work(e) > target)
+    while queue:
+        name = queue.pop()
+        files = out[name]["files"]
+        if len(files) < 2:
+            continue
+        depth = len(Path(os.path.commonpath([f["path"] for f in files])).parts)
+        parts = {}
+        for f in files:
+            p = Path(f["path"]).parts
+            key = "/".join(p[:depth + 1]) if len(p) > depth + 1 else "/".join(p[:depth]) + "/*"
+            parts.setdefault(key, []).append(f)
+        if len(parts) < 2:
+            continue
+        del out[name]
+        for key, chunk in sorted(parts.items()):
+            out[key] = {"files": chunk, "hits": sum(f["hits"] for f in chunk),
+                        "functions": sum(len(f["functions"]) for f in chunk)}
+            if area_work(out[key]) > target:
+                queue.append(key)
+    return out
+
+
 def make_groups(by_area, groups):
     """Greedy balance by reading work: one unit per file plus one per candidate function."""
     bins = [{"areas": [], "work": 0} for _ in range(groups)]
-    work = {name: len(e["files"]) + e["functions"] for name, e in by_area.items()}
+    work = {name: area_work(e) for name, e in by_area.items()}
     for name in sorted(by_area, key=lambda n: (-work[n], n)):
         target = min(bins, key=lambda b: b["work"])
         target["areas"].append(name)
@@ -415,6 +447,12 @@ def print_scan(result, area=None, group=0):
     """Summary by default. Files only for one --area or one --group, so each helper reads only its share."""
     if area or group:
         names = [area] if area else result["groups"][group - 1]["areas"]
+        entries = [result["areas"][n] for n in names if n in result["areas"]]
+        files = [f for e in entries for f in e["files"]]
+        label = f"group {group}" if group else f"area {area}"
+        print(f"# {label}: {len(names)} areas, {len(files)} files, "
+              f"{sum(len(f['functions']) for f in files)} candidate functions, "
+              f"{sum(1 for f in files if not f['functions'])} files without one")
         for name in names:
             entry = result["areas"].get(name)
             if entry is None:
@@ -469,8 +507,12 @@ def resolve(raw, line, files, by_suffix, count):
     return matches[0], None
 
 
+UNCOUNTED_SECTIONS = ("not counted", "plan")
+
+
 def is_not_counted(heading):
-    return (heading.group("md") or heading.group("bold")).strip().rstrip(":").strip().lower().startswith("not counted")
+    title = (heading.group("md") or heading.group("bold")).strip().rstrip(":").strip().lower()
+    return title.startswith(UNCOUNTED_SECTIONS)
 
 
 def site_start(repo, rel, line, cache):
@@ -617,6 +659,7 @@ def main(argv=None):
         if args.source:
             result = load_map(args.source, args.repo, args.include_tests)
             if args.groups and args.groups != len(result["groups"]):
+                result["areas"] = split_heavy(result["areas"], args.groups)
                 result["groups"] = make_groups(result["areas"], args.groups)
         else:
             result = scan(args.repo or ".", args.include_tests, args.groups)
