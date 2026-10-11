@@ -73,7 +73,7 @@ DEF_NAME = re.compile(r"\b(?:def|function|func|fn|fun)\s+(\w+)")
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
 SIGNALS = (
-    ("drex", re.compile(r"\b(systemone|drex)\b", re.I)),
+    ("drex", re.compile(r"\b(systemone|system_one|drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
     ("model-call", re.compile(
         r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete", re.I)),
@@ -462,17 +462,25 @@ def make_groups(by_area, groups):
 
 
 def load_map(path, repo, include_tests):
-    result = json.loads(Path(path).read_text(encoding="utf-8"))
+    try:
+        result = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as error:
+        raise SystemExit(f"cannot read map {path}: {error.strerror}. Run scan --save first.")
+    except ValueError:
+        raise SystemExit(f"{path} is not a valid map. Run scan --save again.")
     if result.get("schema") != SCHEMA:
         raise SystemExit(f"{path} was written by another version of this script. Run scan --save again.")
     if include_tests and not result["include_tests"]:
         raise SystemExit(f"{path} was saved without --include-tests. Run scan --save again with it.")
     if repo is not None and Path(repo).resolve() != Path(result["repo"]):
         raise SystemExit(f"{path} is a map of {result['repo']}, not {Path(repo).resolve()}.")
-    head, _ = git_state(result["repo"])
+    head, dirty = git_state(result["repo"])
     if head and result["head"] and head != result["head"]:
         print(f"warning: {result['repo']} moved from {result['head'][:12]} to {head[:12]} since the map was saved. "
               f"Run scan --save again for exact results.", file=sys.stderr)
+    elif dirty:
+        print(f"warning: {result['repo']} has uncommitted changes. If they came after the map was saved, "
+              f"run scan --save again for exact results.", file=sys.stderr)
     return result
 
 
@@ -540,7 +548,9 @@ def resolve(raw, line, files, by_suffix, count):
     return matches[0], None
 
 
-UNCOUNTED = re.compile(r"^not counted|\bplan\b")
+UNCOUNTED = re.compile(r"^(?:not counted|plan|implementation plan)\b")
+FENCE = re.compile(r"^\s*(```|~~~)")
+PIN = re.compile(r"^(?P<path>.+?):(?P<line>\d+)")
 
 
 def heading_level(heading):
@@ -552,10 +562,19 @@ def is_not_counted(heading):
     return UNCOUNTED.search(title) is not None
 
 
+def closed_span(lines, start, parsed, rel):
+    """True when the function's end is known: parsed Python, or a body opened with a brace."""
+    if rel.endswith(".py"):
+        return parsed
+    head = "\n".join(STRING_OR_COMMENT.sub("", l) for l in lines[start - 1:start + 9])
+    return "{" in head
+
+
 def site_start(repo, rel, line, cache):
     """(first line of the function holding `line`, problem). A blank, comment, or decorator line just above a
     function snaps to it.
-    Python is exact. Other languages only snap when a function is found, because their finder can miss shapes."""
+    Only functions with a known end move a pointer up. Ruby and unparsed Python spans run to the next
+    function, so a pointer there could land in the wrong one."""
     if Path(rel).suffix not in CODE_EXT:
         return line, None
     if rel not in cache:
@@ -567,20 +586,19 @@ def site_start(repo, rel, line, cache):
     spans, parsed, lines = cache[rel]
     def preamble(i):
         text = lines[i].strip()
-        return not text or text.startswith(("@", "#", "//", "/*", "*", ")"))
+        return not text or text.startswith(("@", "#", "//", "/*", "*"))
 
+    owner = owner_of(spans, line)
+    if owner and closed_span(lines, owner[0], parsed, rel):
+        return owner[0], None
     if 1 <= line <= len(lines) and preamble(line - 1):
         below = [s[0] for s in spans if s[0] > line]
         if below and all(preamble(i) for i in range(line, min(below) - 1)):
             return min(below), None
-    owner = owner_of(spans, line)
-    if owner is None:
-        if 1 <= line <= len(lines) and re.match(r"\s*class\s", lines[line - 1]):
-            return line, None
-        if rel.endswith(".py") and parsed:
-            return line, "is not inside a function. Point at the decision function"
-        return line, None
-    return owner[0], None
+    if owner is None and rel.endswith(".py") and parsed and 1 <= line <= len(lines) \
+            and not re.match(r"\s*class\s", lines[line - 1]):
+        return line, "is not inside a function. Point at the decision function"
+    return line, None
 
 
 def check(report_path, repo, fix=False):
@@ -613,9 +631,16 @@ def check(report_path, repo, fix=False):
     seen, spans_cache = {}, {}
     sites = 0
     uncounted_level = None
+    fenced = False
+    headline_at = next((i for i, l in enumerate(lines) if HEADLINE.search(l)), 0)
     for index, line in enumerate(lines):
         number = index + 1
-        heading = HEADING.match(line)
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        heading = None if fenced else HEADING.match(line)
+        if heading and index < headline_at:
+            continue
         if heading:
             level = heading_level(heading)
             if uncounted_level is not None and level <= uncounted_level:
@@ -637,7 +662,8 @@ def check(report_path, repo, fix=False):
         if not SITE_POINTER.match(ptr):
             problems.append(f"line {number}: site pointer `{ptr}` must be a full `path:line`")
         else:
-            rel, at = ptr.split(":")[0], int(ptr.split(":")[1])
+            pin = PIN.match(ptr)
+            rel, at = pin.group("path"), int(pin.group("line"))
             if rel in files:
                 start, problem = site_start(repo, rel, at, spans_cache)
                 if problem:

@@ -266,6 +266,40 @@ class DrexifyScriptTests(unittest.TestCase):
                            "## Audit planning\n- Route (`services/search/app/route.py:1`): candidate.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
 
+    def test_plan_headings_skip_only_after_the_headline(self):
+        site = "- Route (`services/search/app/route.py:1`): candidate.\n"
+        path = self.report("# Drexify plan\nIdentified 1 sites of drexification (0 already on Drex, 0 partial, "
+                           "0 implemented now, 1 candidates)\n## Pricing plan\n" + site)
+        self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n" + site + "## Plan\n```bash\n# run the scan\n```\n"
+                           "- Step (`services/billing/app/match.py:3`): candidate first.\n")
+        self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+
+    def test_check_accepts_range_pointers(self):
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Route (`services/search/app/route.py:1-2`): candidate.\n")
+        self.assertEqual(drexify.check(path, self.repo, fix=True)["problems"], [])
+
+    def test_check_keeps_pointers_where_function_ends_are_unknown(self):
+        (self.repo / "services/search/app/rules.rb").write_text(
+            "def first(x)\n  x\nend\n\nclass Router\n  def pick(q)\n    q\n  end\nend\n")
+        (self.repo / "services/search/app/tail.py").write_text(
+            "def first(q):\n    return call(\n        q,\n    )\n\n\ndef second(q):\n    return q\n")
+        for ptr, expected in (("rules.rb:5", "rules.rb:5"), ("tail.py:4", "tail.py:1")):
+            path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Pick (`services/search/app/" + ptr + "`): candidate.\n")
+            drexify.check(path, self.repo, fix=True)
+            self.assertIn(f"/{expected}`", path.read_text())
+
+    def test_from_explains_a_missing_or_broken_map(self):
+        broken = Path(self.tmp.name) / "broken.json"
+        broken.write_text("{")
+        for path in (broken, Path(self.tmp.name) / "missing.json"):
+            with self.assertRaises(SystemExit) as caught:
+                drexify.load_map(path, None, False)
+            self.assertIn("scan --save", str(caught.exception))
+
+    def test_official_sdk_counts_as_drex(self):
+        self.assertIn("drex", drexify.line_hits("from nace_sdk import NaceClient")[0][1])
+
     def test_check_flags_two_sites_in_one_function_after_snapping(self):
         path = self.report("Identified 2 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 2 candidates)\n"
                            "- A (`services/billing/app/match.py:3`): candidate.\n"
