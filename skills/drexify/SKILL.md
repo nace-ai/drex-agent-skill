@@ -42,7 +42,7 @@ If the script is missing or cannot run, do the same steps by hand.
 6. **Wait for every helper.** Do not write the report or end the turn while any helper is still running. If a helper fails, rerun its group or scan that group yourself. A report built from some groups is not a scan of the repository.
 7. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write a file, pipe the report to `check -` and apply the reported fixes yourself.
 
-Run helpers on a cheaper, faster model when the agent offers a choice. Keep the strongest model for merging, judging fit, and writing the plan.
+Start every helper on a cheaper, faster model, and name that model explicitly when starting it, because some agents give helpers the lead's model by default. Keep the strongest model for merging, judging fit, and writing the plan.
 
 ## What counts as one site
 
