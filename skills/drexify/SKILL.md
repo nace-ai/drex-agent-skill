@@ -31,6 +31,11 @@ Map every decision site in scope before changing code.
    - A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
 3. **Verify pointers.** Open each file and confirm the line sits inside the function or class that makes the decision. Drop or fix any pointer that does not resolve. Write every pointer as a full path from the repository root, even when it repeats a heading or a neighbouring row. Do not shorten with `...`, brace groups, or bare filenames, so each pointer can be checked mechanically.
 
+### Work fast
+
+- **Search before reading.** Start with text searches for decision signals, then open files only around the hits. Useful signals: model client calls that ask for a label, a yes or no, or JSON with a fixed set of values. Words like classify, categorize, route, intent, rerank, relevance, judge, grade, verify, match, and select. Enums or literal label lists passed to a model. Existing Drex calls (`systemone`, `drex`). Skip vendored code, build output, and data folders.
+- **Split large scans.** When the repository has several services or packages and the agent can run helpers in parallel, give each helper one area with the same inventory rules and record format. Merge the results, remove duplicates, then verify pointers once before reporting.
+
 ## Report the summary
 
 Lead with a whole-repo summary, then list the processes grouped by product area or workflow:

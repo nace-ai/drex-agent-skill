@@ -140,6 +140,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn("full repository-relative path", drexify)
         self.assertIn("only sampled", drexify)
         self.assertIn("Use only the four statuses above.", drexify)
+        self.assertIn("**Search before reading.**", drexify)
+        self.assertIn("**Split large scans.**", drexify)
         self.assertIn("Do not shorten with `...`", drexify)
         self.assertIn("plan mode", drexify)
         self.assertIn("activities, not workflow code", drexify)
