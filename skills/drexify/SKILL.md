@@ -25,20 +25,20 @@ Whether Drex is the user's default decision provider is decided by the provider 
 
 `scripts/drexify.py` sits next to this file. Resolve it relative to the real location of this SKILL.md, not the current directory. It needs Python 3.9+, uses only the standard library, reads files, and never calls a model or the network.
 
-- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --groups <N> --save <map.json>` searches the whole repository once for decision signals, in about a minute on a large repository. It prints a short map of areas and N balanced groups, and writes the full map to `<map.json>`.
-- `scan --from <map.json> --groups <N> --group <K>` prints group K from the saved map instantly, without searching again. Each file is followed by its candidate functions as `path:line  name  [signals]`. `--area <name>` prints one area. An area ending in `/*` means only the files directly inside that folder.
-- Candidate functions are functions that call a model, Drex, a reranker, or fuzzy matching, call the repository's own model wrappers, or have a decision name and use labels, regexes, or keyword rules. The list is a checklist, not the answer. Some candidates are not decisions, and some decisions are not listed.
-- `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites a shortened path only when it matches exactly one file. Use `-` as the report to read it from standard input without writing anything.
+- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --save <map.json>` searches the whole repository once for decision signals, in under a minute on a large repository. It prints a short map of areas and balanced groups, one per suggested helper, and writes the full map to `<map.json>`. Add `--groups <N>` to choose the number yourself.
+- `scan --from <map.json> --group <K>` prints group K from the saved map instantly, without searching again. Each file is followed by its candidate functions as `path:line  name  [signals]`. `--area <name>` prints one area. An area ending in `/*` means only the files directly inside that folder. It warns when the repository changed since the map was saved.
+- Candidate functions are functions that call a model, Drex, a reranker, or fuzzy matching, functions that call the repository's own model wrappers, and decision-named functions that use labels, regexes, keyword rules, model wording, or a same-file helper with one of those signals. Wrappers are learned from files that import a model library. The list is a checklist, not the answer. Some candidates are not decisions, and some decisions are not listed.
+- `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites a shortened path only when it matches exactly one file, and moves each site pointer to the first line of the function it sits in. Use `-` as the report to read it from standard input without writing anything.
 
 If the script is missing or cannot run, do the same steps by hand.
 
 ## Scan the repository
 
 1. **Map.** Run `scan --save` once, with the map file outside the repository (for example in the system temp folder). If the session cannot write that file, helpers use `scan --repo <root> --groups <N> --group <K>` instead, which repeats the search.
-2. **Split when it pays.** With three or more areas and helpers available, give each helper one group. Pass it the exact command `python3 "<skill-dir>/scripts/drexify.py" scan --from <map.json> --groups <N> --group <K>` with absolute paths and the same N. Tell it to record only sites whose decision function is inside its group. It may search the rest of the repository for callers of a function, but not for new sites. With one or two areas, scan alone, because one agent is cheaper.
+2. **Split when it pays.** If the scan prints one group, or helpers are not available, scan alone, because one agent is cheaper. Otherwise give each helper one group. Pass it the exact command `python3 "<skill-dir>/scripts/drexify.py" scan --from <map.json> --group <K>` with absolute paths. Tell it to record only sites whose decision function is inside its group. It may search the rest of the repository for callers of a function, but not for new sites.
 3. **Check every candidate function.** Open the lines of each one, enough to see what it returns. Decide whether it is a site using the rules below. This fixed checklist is what keeps two scans of the same code close.
 4. **Then look past the list.** In flagged files without a candidate, and around the candidates, look for decisions the scan cannot see: keyword lists or hand-tuned rules that guess what text means, and decisions made through an agent or request object built in one place and run in another.
-5. **Return a fixed format.** Each helper returns three parts and nothing else: the site lines in the format below, a `## Not counted` section with any dead code or fixed logic worth noting, and one coverage line such as `Checked 212 of 212 candidate functions, read 40 of 95 files without one.`
+5. **Return a fixed format.** Each helper returns three parts and nothing else: the site lines in the format below, a `## Not counted` section with any dead code or fixed logic worth noting, and one coverage line that sorts every candidate, such as `Checked 212 of 212 candidate functions: 48 sites, 61 callers or wrappers, 99 not decisions, 4 dead. Read 40 of 95 files without one.`
 6. **Wait for every helper.** Do not write the report or end the turn while any helper is still running. If a helper fails, rerun its group or scan that group yourself. A report built from some groups is not a scan of the repository.
 7. **Merge and check.** Combine the lines, remove duplicates, write the report to a file, and run `check --fix`. Fix every remaining problem and rerun until it prints `ok`. If the session cannot write a file, pipe the report to `check -` and apply the reported fixes yourself.
 
@@ -83,11 +83,11 @@ Your repo has been scanned. Identified 23 sites of drexification (5 already on D
 - Audit policy identification (`src/policy/match.py:120`): candidate, noul per policy.
 ```
 
-- Each site line is `- <process> (`<path:line>`): <status>, <shape>, <short note>.` The pointer is the decision function.
+- Each site line is `- <process> (`<path:line>`): <status>, <shape>, <short note>.` The pointer is the first line of the decision function, its `def` or signature line. A class line is allowed when the class itself is the decision.
 - Write every pointer as a full path from the repository root, even when it repeats a heading. Do not shorten with `...`, brace groups, or bare filenames.
 - Counts must match the list, including zeros.
 - After the list, add a coverage line: how many candidate functions were checked, and which parts of the repository were read in depth or only sampled.
-- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, under a `## Not counted` heading. `check` verifies pointers there but does not count them.
+- Put anything outside the four statuses, such as dead code or sites that should stay fixed logic, under a heading on its own line that starts with `Not counted`, for example `## Not counted`. `check` verifies pointers there but does not count them. The next heading ends that section.
 - Mark a site implemented only when it was changed and verified in this session. Never report planned work as done.
 - If the user or repository requires another report format, put the summary inside that format instead of replacing it.
 - For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.

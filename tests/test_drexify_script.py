@@ -17,7 +17,7 @@ _spec.loader.exec_module(drexify)
 FILES = {
     "services/billing/app/match.py": "import openai\n\ndef match_contract(x):\n    return client.chat.completions.create(model='m')\n",
     "services/search/app/route.py": "def route_query(q):\n    return 'fact'\n",
-    "services/search/app/drex_call.py": "URL = 'https://drex.nace.ai/v1/systemone'\n",
+    "services/search/app/drex_call.py": "URL = 'https://drex.nace.ai/v1/systemone'\n\ndef call_drex(x):\n    return post(URL, x)\n",
     "shared/core/a/classify.py": "from typing import Literal\nLabel = Literal['a', 'b']\n\ndef classify_doc(t):\n    pass\n",
     "shared/core/b/classify.py": "def classify_page(t):\n    pass\n",
     "services/billing/tests/test_match.py": "def match_contract_test():\n    client.chat.completions.create(model='m')\n",
@@ -66,7 +66,7 @@ class DrexifyScriptTests(unittest.TestCase):
         path = self.report(
             "Your repo has been scanned. Identified 2 sites of drexification "
             "(1 already on Drex, 0 partial, 0 implemented now, 1 candidates). Below is the list of processes:\n\n"
-            "- Search Drex call (`services/search/app/drex_call.py:1`): already on Drex.\n"
+            "- Search Drex call (`services/search/app/drex_call.py:3`): already on Drex.\n"
             "- Contract matching (`services/billing/app/match.py:3`): candidate, choice over contracts.\n")
         result = drexify.check(path, self.repo)
         self.assertEqual(result["problems"], [])
@@ -136,7 +136,7 @@ class DrexifyScriptTests(unittest.TestCase):
             "from core.llm import TextGen\n\ndef pick_template(q):\n    return TextGen().generate_dict(q)\n\n"
             "def unrelated(q):\n    return q\n")
         result = drexify.scan(self.repo)
-        self.assertIn("generate_dict", result["wrappers"])
+        self.assertEqual(result["wrappers"], ["generate_dict", "generate_raw"])
         files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/search/app/pick.py"]["functions"]], ["pick_template"])
 
@@ -147,6 +147,107 @@ class DrexifyScriptTests(unittest.TestCase):
         files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/billing/app/gl.py"]["functions"]],
                          ["_score", "match_accounts"])
+
+    def test_wrappers_skip_decisions_private_helpers_fuzzy_chains_and_duplicates(self):
+        (self.repo / "shared/core/llm.py").write_text(
+            "import openai\nfrom rapidfuzz import fuzz\n\n"
+            "def _post_json(p):\n    return client.chat.completions.create(model='m')\n\n"
+            "def classify_intent(p):\n    return _post_json(p)\n\n"
+            "def fuzzy_score(a):\n    return fuzz.ratio(a, 'x')\n\n"
+            "def normalize_names(a):\n    return fuzzy_score(a)\n\n"
+            "def schema_for(model):\n    return model.model_json_schema()\n\n"
+            "def generate_text(p):\n    return _post_json(p)\n")
+        (self.repo / "shared/core/other.py").write_text("def generate_text(p):\n    return p\n")
+        self.assertEqual(drexify.scan(self.repo)["wrappers"], [])
+
+    def test_model_json_schema_is_not_a_model_call(self):
+        kinds = {k for _, ks in drexify.line_hits("schema = Model.model_json_schema()\n") for k in ks}
+        self.assertNotIn("model-call", kinds)
+
+    def test_function_finder_handles_common_languages(self):
+        samples = {
+            "  async classifyDoc(text: string): Promise<Label> {": "classifyDoc",
+            "  async classifyDoc(": "classifyDoc",
+            "export const route = async (q: string) => {": "route",
+            "const pick = <T>(xs: T[]) => {": "pick",
+            "export function triage(x) {": "triage",
+            "func (s *Svc) Detect(ctx context.Context) error {": "Detect",
+            "pub(crate) fn rerank(items: &[Item]) -> Vec<Item> {": "rerank",
+            "suspend fun matchVendor(name: String): Vendor {": "matchVendor",
+            "    public String classify(String text) {": "classify",
+            "    public async Task<Label> ClassifyAsync(string text) {": "ClassifyAsync",
+            "    public function selectTemplate($x) {": "selectTemplate",
+            "  def self.grade(answer)": "grade",
+        }
+        for line, name in samples.items():
+            with self.subTest(line=line):
+                self.assertEqual(drexify.generic_starts([line]), [(1, name)])
+        for line in ("    if (ready) {", "    foreach (var x in xs) {", "    } else if (x) {", "    return build(x);",
+                     "    doThing(x)", "    lock (gate) {", "    new Foo() {"):
+            with self.subTest(line=line):
+                self.assertEqual(drexify.generic_starts([line]), [])
+
+    def test_generic_spans_end_at_the_closing_brace(self):
+        lines = ["function classifyDoc(t) {", "  return llm.chat.completions.create({x: '}'})", "}", "",
+                 "const client = new OpenAI()"]
+        spans = drexify.generic_spans(lines)
+        self.assertEqual([(s[0], s[1], s[2]) for s in spans], [(1, 3, "classifyDoc")])
+        self.assertIsNone(drexify.owner_of(spans, 5))
+
+    def test_python_spans_cover_decorators_nesting_and_parse_failures(self):
+        text = "@retry\ndef outer():\n    def inner():\n        return 1\n    return inner()\n"
+        self.assertEqual([(s[0], s[1], s[2]) for s in drexify.python_spans(text)],
+                         [(2, 5, "outer"), (3, 4, "outer.inner")])
+        spans, parsed = drexify.file_spans("x.py", "def broken(:\n    pass\n")
+        self.assertFalse(parsed)
+
+    def test_suggested_groups_scale_with_candidate_functions(self):
+        self.assertEqual([drexify.suggested_groups(n) for n in (0, 200, 351, 1245, 9999)], [1, 1, 2, 4, 6])
+
+    def test_check_points_sites_at_the_first_line_of_their_function(self):
+        (self.repo / "services/search/app/pick.py").write_text(
+            "import x\n\n@cache\ndef pick_template(q):\n    a = 1\n    return llm(q)\n")
+        body = ("Identified 2 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 2 candidates)\n"
+                "- Pick (`services/search/app/pick.py:6`): candidate.\n"
+                "- Route (`services/search/app/route.py:2`): candidate.\n")
+        path = self.report(body)
+        self.assertTrue(any("starts at line 4" in p for p in drexify.check(path, self.repo)["problems"]))
+        result = drexify.check(path, self.repo, fix=True)
+        self.assertEqual(result["problems"], [])
+        self.assertIn("`services/search/app/pick.py:4`", path.read_text())
+        self.assertIn("`services/search/app/route.py:1`", path.read_text())
+        path.write_text(body.replace("pick.py:6", "pick.py:3"))
+        drexify.check(path, self.repo, fix=True)
+        self.assertIn("`services/search/app/pick.py:4`", path.read_text())
+        path.write_text(body.replace("pick.py:6", "pick.py:2"))
+        drexify.check(path, self.repo, fix=True)
+        self.assertIn("`services/search/app/pick.py:4`", path.read_text())
+        path.write_text(body.replace("pick.py:6", "pick.py:1"))
+        self.assertTrue(any("not inside a function" in p for p in drexify.check(path, self.repo, fix=True)["problems"]))
+
+    def test_check_flags_two_sites_in_one_function_after_snapping(self):
+        path = self.report("Identified 2 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 2 candidates)\n"
+                           "- A (`services/billing/app/match.py:3`): candidate.\n"
+                           "- B (`services/billing/app/match.py:4`): candidate.\n")
+        self.assertTrue(any("already listed" in p for p in drexify.check(path, self.repo, fix=True)["problems"]))
+
+    def test_from_rejects_stale_or_mismatched_maps_and_regroups(self):
+        saved = Path(self.tmp.name) / "map.json"
+        with redirect_stdout(io.StringIO()):
+            drexify.main(["scan", "--repo", str(self.repo), "--groups", "1", "--save", str(saved)])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(drexify.main(["scan", "--from", str(saved), "--groups", "3", "--group", "3"]), 0)
+        self.assertIn("## ", out.getvalue())
+        with self.assertRaises(SystemExit):
+            drexify.main(["scan", "--from", str(saved), "--repo", self.tmp.name])
+        with self.assertRaises(SystemExit):
+            drexify.main(["scan", "--from", str(saved), "--include-tests"])
+        stale = json.loads(saved.read_text())
+        stale["schema"] = 1
+        saved.write_text(json.dumps(stale))
+        with self.assertRaises(SystemExit):
+            drexify.main(["scan", "--from", str(saved)])
 
     def test_scan_save_and_from_skip_the_second_search(self):
         saved = Path(self.tmp.name) / "map.json"
@@ -163,6 +264,8 @@ class DrexifyScriptTests(unittest.TestCase):
             "- Route (`services/search/app/route.py:1`): candidate.\n\n## Not counted\n\n"
             "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
+        mixed = path.read_text().replace("## Not counted", "## Billing (2 sites, 1 not counted)")
+        self.assertTrue(any("status must start with" in p for p in drexify.check(self.report(mixed), self.repo)["problems"]))
         path.write_text(path.read_text().replace("match.py:3", "match.py:99"))
         self.assertTrue(any("past the end" in p for p in drexify.check(path, self.repo)["problems"]))
 
