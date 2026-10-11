@@ -19,14 +19,16 @@ Map every place a codebase makes a semantic judgment, report the whole picture f
 
 This skill decides where Drex fits. The `drex-for-harness` skill covers how to call it: question design, the request contract, credentials, the bundled helper, and verification. Load it before designing questions or writing a call. If it is not installed, read the live Drex docs at `https://drex.nace.ai/docs` before writing any integration, and do not guess fields, model ids, or limits.
 
-Plugin option `make_default`: `${user_config.make_default}`. Follow the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider at runtime. Keeping the existing provider path behind an explicit configuration switch is allowed.
+Plugin option `make_default`: `${user_config.make_default}`. Follow the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider at runtime. Keeping the existing provider path behind an explicit configuration switch is allowed. If the value above is still a literal placeholder, you are outside the Claude plugin. Follow an explicit preference in the agent's own instructions, and otherwise treat Drex as available but not the default.
 
 ## Scan the repository
 
 Map every decision site in scope before changing code.
 
-1. **Inventory.** Within the user's scope, find semantic decisions: model calls whose output is a label, boolean, pick-one-of-N, ranking, or level. Include heuristic or keyword classifiers that stand in for a judgment, rerankers and relevance filters, verification of extracted values, and existing Drex calls. Skip text generation, chat, summarization, embeddings, and deterministic logic.
-2. **Record each site.** Plain-language process name, a verified `path:line` pointer, the current mechanism, the Drex shape (`choice`, `noul`, or `score`), fit, deployment constraints, and status: already on Drex, partial, candidate, or implemented in this session. One entry per decision, not per helper.
+1. **Inventory.** Within the user's scope, find semantic decisions: model calls whose output is a label, boolean, pick-one-of-N, ranking, or level. Include heuristic or keyword classifiers that guess what text means, rerankers and relevance filters, verification of extracted values, and existing Drex calls. Skip text generation, chat, summarization, embeddings, and deterministic logic such as thresholds on measured numbers, schema checks, and exact lookups.
+2. **Record each site.** Plain-language process name, a verified `path:line` pointer with the full repository-relative path, the current mechanism, the Drex shape, fit, deployment constraints, and status: already on Drex, partial (a Drex path exists but is opt-in or not the default), candidate, or implemented in this session. Count one entry per distinct judgment. When several call sites make the same judgment, list their pointers under one entry.
+   - Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level.
+   - A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
 3. **Verify pointers.** Open each file and confirm the line sits inside the function or class that makes the decision. Drop or fix any pointer that does not resolve.
 
 ## Report the summary
@@ -34,7 +36,7 @@ Map every decision site in scope before changing code.
 Lead with a whole-repo summary, then list the processes grouped by product area or workflow:
 
 ```text
-Your repo has been scanned. Identified 23 sites of drexification (5 already on Drex, 2 implemented now, 16 candidates). Below is the list of processes:
+Your repo has been scanned. Identified 23 sites of drexification (5 already on Drex, 3 partial, 2 implemented now, 13 candidates). Below is the list of processes:
 
 - Document splitting (`src/ingest/split.py:42`): already on Drex.
 - Document classification (`src/ingest/classify.py:88`): implemented now, choice over 11 section types, behind `USE_DREX_CLASSIFY`.
@@ -42,7 +44,7 @@ Your repo has been scanned. Identified 23 sites of drexification (5 already on D
 - Audit policy identification (`src/policy/match.py:120`): candidate, noul per policy.
 ```
 
-Counts must match the list. Mark a site implemented only when it was changed and verified in this session. Never report planned work as done. If the user or repository requires another report format, put the summary inside that format instead of replacing it. For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
+Counts must match the list, and every status must appear in the headline. State which parts of the repository were read in depth and which were only sampled, so the reader knows how complete the list is. Mark a site implemented only when it was changed and verified in this session. Never report planned work as done. If the user or repository requires another report format, put the summary inside that format instead of replacing it. For a large list, write it to a file the user can review and keep the chat reply to the headline and top candidates.
 
 ## Pace the work
 

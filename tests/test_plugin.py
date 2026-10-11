@@ -135,7 +135,10 @@ class PluginTests(unittest.TestCase):
                         "## Pace the work", "## Implement one site"):
             self.assertIn(heading, drexify)
         self.assertIn("Your repo has been scanned.", drexify)
-        self.assertIn("Counts must match the list.", drexify)
+        self.assertIn("Counts must match the list", drexify)
+        self.assertIn("3 partial", drexify)  # headline example covers every status
+        self.assertIn("full repository-relative path", drexify)
+        self.assertIn("only sampled", drexify)
         self.assertIn("plan mode", drexify)
         self.assertIn("activities, not workflow code", drexify)
         self.assertNotIn("## Call Drex", drexify)  # API contract lives in drex-for-harness only
