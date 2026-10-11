@@ -38,8 +38,8 @@ FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "text-rule", "local-call"}
 MODEL_REACH = {"model-call", "wrapper-call", "model-reach"}
 MAX_BYTES = 1_000_000
 MAX_LINES_PER_FILE = 8
-FUNCTIONS_PER_HELPER = 350
-MAX_GROUPS = 6
+FUNCTIONS_PER_HELPER = 175
+MAX_GROUPS = 8
 HEADING = re.compile(r"^\s*(?:#{1,6}\s+(?P<md>.+)|\*\*(?P<bold>[^*]+)\*\*:?\s*)$")
 DECISION_WORDS = (r"classif|categori|route|router|intent|rerank|relevan|judge|grade|verif|match|select|detect|triage|"
                   r"adjudicat|decide|label")

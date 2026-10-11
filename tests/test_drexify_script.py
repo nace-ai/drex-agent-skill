@@ -221,7 +221,7 @@ class DrexifyScriptTests(unittest.TestCase):
                          r"^# group 1: \d+ areas, \d+ files, \d+ candidate functions, \d+ files without one$")
 
     def test_suggested_groups_scale_with_candidate_functions(self):
-        self.assertEqual([drexify.suggested_groups(n) for n in (0, 200, 351, 1245, 9999)], [1, 1, 2, 4, 6])
+        self.assertEqual([drexify.suggested_groups(n) for n in (0, 175, 176, 908, 9999)], [1, 1, 2, 6, 8])
 
     def test_check_points_sites_at_the_first_line_of_their_function(self):
         (self.repo / "services/search/app/pick.py").write_text(
