@@ -49,13 +49,13 @@ Start every helper on a cheaper, faster model, and name that model explicitly wh
 Counting must be mechanical, so two scans of the same code give the same number.
 
 - **One site is one decision function:** the function or method whose return value is the judgment, meaning a label, a yes or no, a pick from a set, or an ordered level.
-- When a judgment passes through several functions, the site is the function that contains the model call, Drex call, or rule, even when a caller is the one on the candidate list.
+- When a judgment passes through several functions, the site is the function that contains the model call, Drex call, or rule, even when a caller is the one on the candidate list. A shared client function that only sends requests for several different judgments is a wrapper. Each function that builds its own question for it is a site.
 - Its callers, prompt, schema, parser, and settings are extra pointers on the same line, not new sites. Parsing the model's reply, for example a PASS or FAIL string, is part of the same site.
 - The same judgment in two different functions is two sites only when each function makes its own model call, Drex call, or rule, because each one migrates separately. A function that gets the judgment by calling another site is a caller, not a site.
 - One model call that returns several judgments at once is one site. Give the shape of the judgment the code acts on first, and name the others in the note.
 - In scope: production code and evaluation code. Out of scope: tests, fixtures, notebooks, generated code, and vendored code.
-- Out of scope: text generation, chat, summarization, embeddings, and fixed logic such as thresholds on measured numbers (lengths, counts, scores), schema checks, and exact lookups. A keyword list or pattern matched against free text to guess what it means is a site, not fixed logic.
-- Functions with no callers are not counted. Mention them in a separate note. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
+- Out of scope: text generation, chat, summarization, embeddings, and fixed logic. Fixed logic includes thresholds on measured numbers (lengths, counts, scores), also when the score compares two texts, such as edit distance, token overlap, or recall. It also includes schema checks, exact lookups, and patterns that recognize a format, such as a number, date, currency, ID, or markup syntax. A keyword list or pattern matched against free text to guess its meaning, such as intent, topic, tone, or document type, is a site.
+- Functions with no callers are not counted, and neither are functions reached only from them. Mention them in a separate note. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
 
 ## Pick the status
 
