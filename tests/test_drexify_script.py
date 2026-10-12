@@ -146,15 +146,22 @@ class DrexifyScriptTests(unittest.TestCase):
             "    return client.chat.completions.create(model='m')\n")
         (self.repo / "services/search/app/client.py").write_text(
             "def forward_to_model(prompt):\n    return post_to_model(prompt)\n\n"
-            "def ask_through_client(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def ask_model_client(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def relay_model_call(prompt):\n    return ask_model_client(prompt)\n\n"
+            "def should_ask_model(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def send_to_model(prompt):\n    return forward_to_model(prompt)\n\n"
             "def summarize_thread(prompt):\n    return forward_to_model(prompt)\n")
+        (self.repo / "services/chat/app").mkdir(parents=True)
+        (self.repo / "services/chat/app/send.py").write_text(
+            "def send_to_model(prompt):\n    return forward_to_model(prompt)\n")
         (self.repo / "services/search/app/grade.py").write_text(
-            "def grade_answer(text):\n    return ask_through_client(text)\n\n"
+            "def grade_answer(text):\n    return ask_model_client(text)\n\n"
             "def is_relevant(text):\n    return forward_to_model(text)\n")
         result = drexify.scan(self.repo)
         self.assertIn("forward_to_model", result["wrappers"])
-        self.assertIn("ask_through_client", result["wrappers"])
-        for name in ("grade_answer", "is_relevant", "summarize_thread"):
+        self.assertIn("ask_model_client", result["wrappers"])
+        for name in ("grade_answer", "is_relevant", "summarize_thread", "should_ask_model", "send_to_model",
+                     "relay_model_call"):
             self.assertNotIn(name, result["wrappers"])
         files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/search/app/grade.py"]["functions"]],
@@ -165,13 +172,17 @@ class DrexifyScriptTests(unittest.TestCase):
         eval_file.parent.mkdir(parents=True)
         eval_file.write_text(
             "def grade_reply(text):\n    return client.chat.completions.create(model='m')\n")
-        for rel in ("tests/plain_check.py", "tests/evals/test_judge.py", "examples/chat/grade.py"):
+        skipped = ("tests/plain_check.py", "tests/evals/test_judge.py", "examples/chat/grade.py",
+                   "samples/grade.py", "examples/evals/grade.py", "tests/evals/fixtures/fake.py",
+                   "evals/tests/helpers.py", "testing/llmtest/check.go")
+        for rel in skipped + ("evals/judge.py",):
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
             (self.repo / rel).write_text(
                 "def grade_reply(text):\n    return client.chat.completions.create(model='m')\n")
         paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
         self.assertIn("tests/evals/judge.py", paths)
-        for rel in ("tests/plain_check.py", "tests/evals/test_judge.py", "examples/chat/grade.py"):
+        self.assertIn("evals/judge.py", paths)
+        for rel in skipped:
             self.assertNotIn(rel, paths)
         self.assertNotIn("services/billing/tests/test_match.py", paths)
         self.assertIn("services/billing/tests/test_match.py",

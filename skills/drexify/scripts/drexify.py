@@ -30,8 +30,8 @@ POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<l
 SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
-TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks__"}
-EXAMPLE_DIRS = {"examples", "example", "samples", "sample"}
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils"}
+FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
@@ -76,7 +76,7 @@ LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
 CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
 ASSIGNED = re.compile(r"^(?P<indent>\s*)(?:(?:export|const|let|var|final|static|private|public|protected|readonly|pub)\s+)*"
                       r"(?:[A-Za-z_][\w.]*(?:<[^=]*>)?(?:\[\])*\s+)?([A-Za-z_]\w*)\s*(?::[^=]+)?:?=(?!=)")
-DEF_NAME = re.compile(r"\b(?:def|function|func|fn|fun)\s+(\w+)")
+DEF_NAME = re.compile(r"\b(?:(?:def|function|func|fn|fun)\s+|func\s*\([^)]*\)\s*)(\w+)")
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
 SIGNALS = (
@@ -121,7 +121,7 @@ LABEL_GROUP = re.compile(
 LABEL_SKIP = re.compile(r"\b(?:create_index|Index|Column|ForeignKey|UniqueConstraint)\b")
 WRAPPER_MIN_LEN = 8
 WRAPPER_DEPTH = 3
-CLIENT_NAME = re.compile(r"model|llm|completion|prompt|message|client|wrapper|gpt|converse", re.I)
+CLIENT_NAME = re.compile(r"model|llm|gpt|completion|converse", re.I)
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
                 "request", "response", "get_client", "get_model", "from_config", "validate"}
 
@@ -171,10 +171,11 @@ def scannable(rel, include_tests):
         return False
     if include_tests:
         return True
-    if is_test_name(name):
+    dirs = parts[:-1]
+    if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs):
         return False
-    dirs = set(parts[:-1])
-    return bool(dirs & EVAL_DIRS) or not dirs & (TEST_DIRS | EXAMPLE_DIRS)
+    last_test = max((i for i, p in enumerate(dirs) if p in TEST_DIRS), default=-1)
+    return last_test < 0 or any(p in EVAL_DIRS for p in dirs[last_test + 1:])
 
 
 def assign_areas(paths):
@@ -594,7 +595,7 @@ def scan(repo, include_tests=False, groups=None):
     """Find direct signals, learn model wrappers a few layers deep, then mark their callers.
 
     The first pass learns wrappers in files that import a model library. Each later layer
-    is a public, non-decision function with a client-style name that calls an already learned
+    is a public, non-decision function named for a model that calls an already learned
     wrapper and is defined once, so a decision behind two in-house layers is still listed."""
     repo = Path(repo)
     listed = list_files(repo)
