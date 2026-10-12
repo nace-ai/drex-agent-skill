@@ -298,6 +298,13 @@ class DrexifyScriptTests(unittest.TestCase):
                 "  run() {\n    doThing(\n      a,\n    );\n    if (\n      x\n    ) {\n      y();\n    }\n  }\n}\n")
         self.assertEqual([n for _, n in drexify.generic_starts(text.splitlines())], ["chatStream", "completion", "run"])
 
+    def test_predicates_with_keyword_rules_are_candidates(self):
+        text = ("const PHRASES = ['sure', 'here is'];\n\nfunction isEnglishLine(line: string): boolean {\n"
+                "  return PHRASES.some((p) => line.startsWith(p));\n}\n\nfunction isEmpty(x: string) {\n  return x === '';\n}\n")
+        spans, _ = drexify.file_spans("f.ts", text)
+        got = [f["name"] for f in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["isEnglishLine"])
+
     def test_fenced_site_lines_are_not_counted(self):
         path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Route (`services/search/app/route.py:1`): candidate.\n\n"
                            "```text\n- Copy (`services/search/app/route.py:1`): candidate.\n```\n")

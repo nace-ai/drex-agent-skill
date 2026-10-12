@@ -46,6 +46,8 @@ PROGRESS_EVERY = 2000
 DECISION_WORDS = (r"classif|categori|route|router|intent|rerank|relevan|judge|grade|verif|match|select|detect|triage|"
                   r"adjudicat|decide|label")
 DECISION_NAME = re.compile(DECISION_WORDS, re.I)
+PREDICATE_NAME = re.compile(r"(?:^|[._])(?:is|should|looks|seems)(?:[A-Z]|_[a-z])")
+TEXT_RULE_KINDS = {"text-rule", "label-set"}
 NOT_FUNCTIONS = {"if", "for", "foreach", "while", "switch", "catch", "return", "function", "with", "elif", "else", "do",
                  "try", "new", "using", "lock", "synchronized", "when", "match", "sizeof", "typeof", "await", "throw"}
 MODIFIERS = (r"(?:(?:export|default|public|private|protected|internal|static|final|abstract|override|readonly|async|"
@@ -96,7 +98,8 @@ SIGNALS = (
     ("text-rule", re.compile(r"\.lower\(\)\s*(?:in\b|==|\.startswith|\.endswith)|\bin\s+[\w.]+\.lower\(\)|"
                              r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\s*(?:===?|\.includes|\.startsWith|\.endsWith)|"
                              r"\bstrings\.ToLower\([^)]*\)\s*(?:==|!=)|\bstrings\.(?:Contains|HasPrefix|HasSuffix)\(strings\.ToLower|"
-                             r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(")),
+                             r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(|"
+                             r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(")),
 )
 WRAPPER_MIN_LEN = 8
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
@@ -328,7 +331,8 @@ def candidate_functions(spans, found, lines):
     """Functions that look like a decision, in line order."""
     out = []
     for (line, name), kinds in sorted(by_function(spans, found, lines).items()):
-        if kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK):
+        if (kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK)
+                or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)):
             out.append({"name": name, "line": line, "kinds": sorted(kinds - {"model-reach"})})
     return out
 
