@@ -177,6 +177,13 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual([fn["name"] for fn in files["services/search/app/detect.go"]["functions"]],
                          ["detectRepetition", "matchLabel"])
 
+    def test_framework_llm_objects_are_model_calls(self):
+        for line in ("response = self.llm.call(prompt)", "out = await llm_instance.ainvoke(messages)",
+                     "r = self._llm.call([m])", "await this.llm.chat(messages)", "chat_model.invoke(x)"):
+            self.assertIn("model-call", drexify.line_hits(line)[0][1], line)
+        for line in ("self.llm = llm", "llm_config.get('model')", "callback.call(x)"):
+            self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
+
     def test_model_json_schema_is_not_a_model_call(self):
         kinds = {k for _, ks in drexify.line_hits("schema = Model.model_json_schema()\n") for k in ks}
         self.assertNotIn("model-call", kinds)

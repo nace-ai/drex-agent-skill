@@ -79,7 +79,8 @@ SIGNALS = (
     ("drex", re.compile(r"\b(systemone|system_one|drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
     ("model-call", re.compile(
         r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
-        r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete", re.I)),
+        r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
+        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(", re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
     ("model-import", re.compile(
         r"^\s*(?:from|import)\s+(?:openai|anthropic|google\.genai|google\.generativeai|vertexai|litellm|langchain\w*|"
