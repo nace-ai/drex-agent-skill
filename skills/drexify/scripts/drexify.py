@@ -33,8 +33,8 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dis
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks__"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
-STRONG = DIRECT | {"model-import", "wrapper-call"}
-FUNCTION_STRONG = DIRECT | {"wrapper-call"}
+STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
+FUNCTION_STRONG = DIRECT | {"wrapper-call", "task-output"}
 FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "text-rule", "local-call"}
 MODEL_REACH = {"model-call", "wrapper-call", "model-reach"}
 MAX_BYTES = 1_000_000
@@ -46,7 +46,7 @@ PROGRESS_EVERY = 2000
 DECISION_WORDS = (r"classif|categori|route|router|intent|rerank|relevan|judge|grade|verif|match|select|detect|triage|"
                   r"adjudicat|decide|label")
 DECISION_NAME = re.compile(DECISION_WORDS, re.I)
-PREDICATE_NAME = re.compile(r"(?:^|[._])(?:is|should|looks|seems)(?:[A-Z]|_[a-z])")
+PREDICATE_NAME = re.compile(r"(?:^|[._])(?:is|should|looks|seems|can|has)(?:[A-Z]|_[a-z])")
 TEXT_RULE_KINDS = {"text-rule", "label-set"}
 NOT_FUNCTIONS = {"if", "for", "foreach", "while", "switch", "catch", "return", "function", "with", "elif", "else", "do",
                  "try", "new", "using", "lock", "synchronized", "when", "match", "sizeof", "typeof", "await", "throw"}
@@ -101,6 +101,18 @@ SIGNALS = (
                              r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(|"
                              r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(")),
 )
+# Own kind, not a model call, so wrapper learning stays unchanged. Case-sensitive: ignore-case
+# would treat `output_json = answer...` as a schema argument.
+TASK_OUTPUT_ARG = re.compile(
+    r"(?<!\.)\b(?:output_pydantic|output_json)\s*=(?!=)\s*(?!None\b|True\b|False\b)[A-Z_]")
+FOR_VAR = re.compile(r"^\s*for\s+([A-Za-z_]\w*)\s+in\s+\S+")
+PHRASE_WINDOW = 6
+TEXTISH = re.compile(r"content|text|message|line|body|answer|prompt|sentence|phrase|comment|query|title|reason|thought|lower", re.I)
+PHRASEISH = re.compile(r"indicator|phrase|keyword|pattern|needle|marker|prefix|token|word", re.I)
+LABEL_GROUP = re.compile(
+    r"""(?<![\w.])(?:\(|\[)\s*['"][A-Za-z_][A-Za-z0-9_]{0,40}['"]"""
+    r"""(?:\s*,\s*['"][A-Za-z_][A-Za-z0-9_]{0,40}['"]){1,12}\s*,?\s*(?:\)|\])""")
+LABEL_SKIP = re.compile(r"\b(?:create_index|Index|Column|ForeignKey|UniqueConstraint)\b")
 WRAPPER_MIN_LEN = 8
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
                 "request", "response", "get_client", "get_model", "from_config", "validate"}
@@ -327,22 +339,88 @@ def by_function(spans, found, lines):
     return grouped
 
 
+def normalize_found(found):
+    out = []
+    for number, kinds in found:
+        mapped = []
+        for kind in kinds:
+            kind = "label-set" if kind == "label-arg" else kind
+            if kind not in mapped:
+                mapped.append(kind)
+        out.append((number, mapped))
+    return out
+
+
+HELPER_DECISION = re.compile(DECISION_WORDS + r"|evaluat", re.I)
+
+
+def task_output_helpers(spans, lines):
+    names = set()
+    for start, end, name, _calls in spans:
+        if not HELPER_DECISION.search(name):
+            continue
+        if any(TASK_OUTPUT_ARG.search(line) for line in lines[start - 1:end]):
+            names.add(short(name))
+    return names
+
+
 def candidate_functions(spans, found, lines):
     """Functions that look like a decision, in line order."""
+    found = normalize_found(found)
+    helpers = task_output_helpers(spans, lines)
+    calls = {(span[0], span[2]): span[3] for span in spans}
     out = []
     for (line, name), kinds in sorted(by_function(spans, found, lines).items()):
+        calls_task = bool(calls.get((line, name), ()) & (helpers - {short(name)}))
         if (kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK)
-                or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)):
+                or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)
+                or calls_task):
             out.append({"name": name, "line": line, "kinds": sorted(kinds - {"model-reach"})})
     return out
 
 
+def phrase_loop_hits(lines):
+    hits = set()
+    pending = []
+    for index, line in enumerate(lines):
+        match = FOR_VAR.match(line)
+        if match:
+            pending.append((index + PHRASE_WINDOW, match.group(1)))
+        pending = [(expiry, var) for expiry, var in pending if index <= expiry]
+        for _expiry, var in pending:
+            member = re.search(rf"\b(?:if|elif)\s+\(?\s*{re.escape(var)}\s+in\s+([A-Za-z_][\w.]*)", line)
+            textual = member and (TEXTISH.search(member.group(1)) or PHRASEISH.search(var))
+            if textual or re.search(rf"\.(?:startswith|endswith|find)\(\s*{re.escape(var)}\b", line):
+                hits.add(index)
+    return hits
+
+
+def label_arg_line(line):
+    """A label group that is a call argument. A line that is only the group counts too."""
+    match = LABEL_GROUP.search(line)
+    if not match or LABEL_SKIP.search(line):
+        return False
+    before = line[:match.start()]
+    if re.search(r"(?i)\bIN\s*$", before):
+        return False
+    return before.strip() == "" or re.search(r"[(,]\s*$", before) is not None
+
+
 def line_hits(text, wrappers=None):
+    lines = text.splitlines()
+    phrase_hits = phrase_loop_hits(lines)
     found = []
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(lines, 1):
         kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
         if wrappers is not None and wrappers.search(line) and not FUNC_START.match(line):
             kinds.append("wrapper-call")
+        index = number - 1
+        if index in phrase_hits and "text-rule" not in kinds:
+            kinds.append("text-rule")
+        if label_arg_line(line):
+            kinds.append("label-arg")
+        if TASK_OUTPUT_ARG.search(line):
+            kinds.append("task-output")
         if kinds:
             found.append((number, kinds))
     return found
@@ -401,11 +479,11 @@ def scan(repo, include_tests=False, groups=None):
         scanned += 1
         if scanned % PROGRESS_EVERY == 0:
             print(f"scanned {scanned} of {len(rels)} files", file=sys.stderr, flush=True)
-        if not ANY_SIGNAL.search(text):
+        if not ANY_SIGNAL.search(text) and not TASK_OUTPUT_ARG.search(text):
             continue
         found = line_hits(text)
         if keep_file(found):
-            remember(rel, text, found)
+            remember(rel, text, normalize_found(found))
             wrappers |= wrapper_names(spans[rel], found, text.splitlines())
     if wrappers:
         callers, defined = [], {}
@@ -420,7 +498,7 @@ def scan(repo, include_tests=False, groups=None):
             if pattern.search(text):
                 found = line_hits(text, pattern)
                 if keep_file(found):
-                    remember(rel, text, found)
+                    remember(rel, text, normalize_found(found))
     areas = assign_areas(list(hits))
     by_area = {}
     functions_total = 0

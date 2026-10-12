@@ -298,6 +298,91 @@ class DrexifyScriptTests(unittest.TestCase):
                 "  run() {\n    doThing(\n      a,\n    );\n    if (\n      x\n    ) {\n      y();\n    }\n  }\n}\n")
         self.assertEqual([n for _, n in drexify.generic_starts(text.splitlines())], ["chatStream", "completion", "run"])
 
+    def test_phrase_loop_is_a_text_rule(self):
+        text = (
+            "def _should_replan(self):\n"
+            "    content = str(last.get('content', '')).lower()\n"
+            "    indicators = ['need to reconsider', 'replan']\n"
+            "    for indicator in indicators:\n"
+            "        if indicator in content:\n"
+            "            return True\n"
+            "    return False\n\n"
+            "def has_key(key):\n"
+            "    return key in some_dict\n\n"
+            "def walk(rows):\n"
+            "    for key in rows:\n"
+            "        if other in key:\n"
+            "            return key\n\n"
+            "def is_known(rows, seen):\n"
+            "    for key in rows:\n"
+            "        if key in seen:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        hits = {line.strip(): kinds for line, kinds in (
+            (text.splitlines()[n - 1], ks) for n, ks in drexify.line_hits(text))}
+        self.assertIn("text-rule", hits["if indicator in content:"])
+        self.assertNotIn("text-rule", hits.get("return key in some_dict", []))
+        self.assertNotIn("text-rule", hits.get("if other in key:", []))
+        self.assertNotIn("text-rule", hits.get("if key in seen:", []))
+        spans, _ = drexify.file_spans("f.py", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["_should_replan"])
+
+    def test_inline_label_tuple_makes_a_can_predicate_a_candidate(self):
+        text = (
+            "def can_answer_from_history(self, context):\n"
+            "    outcome = self._collapse_to_outcome(\n"
+            "        feedback,\n"
+            "        ('answer_from_history', 'route_to_flow'),\n"
+            "        llm,\n"
+            "    )\n"
+            "    return outcome == 'answer_from_history'\n\n"
+            "def can_store(self):\n"
+            "    labels = ('answer_from_history', 'route_to_flow')\n"
+            "    return labels\n\n"
+            "def save_pair(self):\n"
+            "    self.write(('answer_from_history', 'route_to_flow'))\n\n"
+            "def upgrade():\n"
+            "    op.execute(\"status IN ('pending', 'draft')\")\n\n"
+            "def verify_token(token):\n"
+            "    jwt.decode(token, options={'require': ['sub', 'email', 'iat']})\n"
+        )
+        spans, _ = drexify.file_spans("f.py", text)
+        found = drexify.line_hits(text)
+        got = {fn["name"]: fn["kinds"] for fn in drexify.candidate_functions(spans, found, text.splitlines())}
+        self.assertEqual(list(got), ["can_answer_from_history"])
+        self.assertIn("label-set", got["can_answer_from_history"])
+        self.assertNotIn("label-set", {k for _, ks in found for k in ks})
+        self.assertTrue(any("label-arg" in ks for _, ks in found))
+
+    def test_task_output_promotes_the_same_file_caller(self):
+        text = (
+            "def _evaluation_task(agent, task):\n"
+            "    return Task(\n"
+            "        description=task.description,\n"
+            "        agent=agent,\n"
+            "        output_pydantic=TaskEvaluationPydanticOutput,\n"
+            "    )\n\n"
+            "def evaluate(self, task_output):\n"
+            "    evaluation_task = self._evaluation_task(agent, task_output)\n"
+            "    return evaluation_task.execute_sync()\n\n"
+            "def kickoff(self, tasks):\n"
+            "    return self.crew.kickoff(tasks)\n"
+        )
+        kinds = drexify.line_hits("output_pydantic=TaskEvaluationPydanticOutput")[0][1]
+        self.assertIn("task-output", kinds)
+        self.assertNotIn("model-call", kinds)
+        self.assertFalse(drexify.line_hits("task.output_pydantic = None"))
+        self.assertFalse(drexify.line_hits("output_json = answer.model_dump_json()"))
+        self.assertFalse(drexify.line_hits("evaluation_task.execute_sync()"))
+        agent = {k for _, ks in drexify.line_hits("return Agent(model, output_type=Label)") for k in ks}
+        self.assertNotIn("task-output", agent)
+        self.assertNotIn("model-call", agent)
+        spans, _ = drexify.file_spans("f.py", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["_evaluation_task", "evaluate"])
+
     def test_predicates_with_keyword_rules_are_candidates(self):
         text = ("const PHRASES = ['sure', 'here is'];\n\nfunction isEnglishLine(line: string): boolean {\n"
                 "  return PHRASES.some((p) => line.startsWith(p));\n}\n\nfunction isEmpty(x: string) {\n  return x === '';\n}\n")
