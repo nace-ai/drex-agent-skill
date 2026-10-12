@@ -343,6 +343,54 @@
           "function": "evaluate"
         }
       ]
+    },
+    {
+      "name": "khoj",
+      "url": "https://github.com/khoj-ai/khoj.git",
+      "commit": "ae229ca894c0b80ad84664afcfdde523b5e87057",
+      "language": "python",
+      "note": "Held out from tuning. The scan listed 1 of 5 at ccacd70.",
+      "sites": [
+        {
+          "path": "src/khoj/routers/helpers.py",
+          "line": 325,
+          "function": "acheck_if_safe_prompt"
+        },
+        {
+          "path": "src/khoj/routers/helpers.py",
+          "line": 362,
+          "function": "aget_data_sources_and_output_format"
+        },
+        {
+          "path": "src/khoj/routers/helpers.py",
+          "line": 2489,
+          "function": "should_notify"
+        },
+        {
+          "path": "src/khoj/search_type/text_search.py",
+          "line": 235,
+          "function": "cross_encoder_score"
+        },
+        {
+          "path": "tests/evals/eval.py",
+          "line": 466,
+          "function": "evaluate_response_with_gemini"
+        }
+      ]
+    },
+    {
+      "name": "langchaingo",
+      "url": "https://github.com/tmc/langchaingo.git",
+      "commit": "6351d0d03286ba1f8be78b572d88c9b43ed6b869",
+      "language": "go",
+      "note": "Held out from tuning. The scan listed 1 of 1 at ccacd70.",
+      "sites": [
+        {
+          "path": "chains/map_rerank_documents.go",
+          "line": 70,
+          "function": "Call"
+        }
+      ]
     }
   ]
 }

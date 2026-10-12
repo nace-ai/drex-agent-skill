@@ -140,6 +140,43 @@ class DrexifyScriptTests(unittest.TestCase):
         files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/search/app/pick.py"]["functions"]], ["pick_template"])
 
+    def test_scan_learns_a_two_layer_wrapper_chain_without_a_model_import(self):
+        (self.repo / "shared/core/llm.py").write_text(
+            "import openai\n\ndef post_to_model(prompt):\n"
+            "    return client.chat.completions.create(model='m')\n")
+        (self.repo / "services/search/app/client.py").write_text(
+            "def forward_to_model(prompt):\n    return post_to_model(prompt)\n\n"
+            "def ask_through_client(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def summarize_thread(prompt):\n    return forward_to_model(prompt)\n")
+        (self.repo / "services/search/app/grade.py").write_text(
+            "def grade_answer(text):\n    return ask_through_client(text)\n\n"
+            "def is_relevant(text):\n    return forward_to_model(text)\n")
+        result = drexify.scan(self.repo)
+        self.assertIn("forward_to_model", result["wrappers"])
+        self.assertIn("ask_through_client", result["wrappers"])
+        for name in ("grade_answer", "is_relevant", "summarize_thread"):
+            self.assertNotIn(name, result["wrappers"])
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["services/search/app/grade.py"]["functions"]],
+                         ["grade_answer", "is_relevant"])
+
+    def test_eval_folders_are_scanned_when_plain_tests_are_not(self):
+        eval_file = self.repo / "tests/evals/judge.py"
+        eval_file.parent.mkdir(parents=True)
+        eval_file.write_text(
+            "def grade_reply(text):\n    return client.chat.completions.create(model='m')\n")
+        for rel in ("tests/plain_check.py", "tests/evals/test_judge.py", "examples/chat/grade.py"):
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_text(
+                "def grade_reply(text):\n    return client.chat.completions.create(model='m')\n")
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn("tests/evals/judge.py", paths)
+        for rel in ("tests/plain_check.py", "tests/evals/test_judge.py", "examples/chat/grade.py"):
+            self.assertNotIn(rel, paths)
+        self.assertNotIn("services/billing/tests/test_match.py", paths)
+        self.assertIn("services/billing/tests/test_match.py",
+                      {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]})
+
     def test_scan_follows_same_file_helpers_for_decision_named_functions(self):
         (self.repo / "services/billing/app/gl.py").write_text(
             "from rapidfuzz import fuzz\n\ndef _score(a, b):\n    return fuzz.ratio(a, b)\n\n"
@@ -176,6 +213,15 @@ class DrexifyScriptTests(unittest.TestCase):
         files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/search/app/detect.go"]["functions"]],
                          ["detectRepetition", "matchLabel"])
+
+    def test_go_generate_content_is_a_model_call(self):
+        for line in ("resp, err := llm.GenerateContent(ctx, messages)",
+                     "text, err := llms.GenerateFromSinglePrompt(ctx, llm, prompt)",
+                     'url := fmt.Sprintf("%s/models/%s:generateContent", root, model)'):
+            self.assertIn("model-call", drexify.line_hits(line)[0][1], line)
+        for line in ("type GenerateContentResponse struct {}",
+                     "func (m *Model) GenerateContent(ctx context.Context, mc []Message) error {"):
+            self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
 
     def test_framework_llm_objects_are_model_calls(self):
         for line in ("response = self.llm.call(prompt)", "out = await llm_instance.ainvoke(messages)",

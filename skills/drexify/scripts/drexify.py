@@ -31,6 +31,8 @@ SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks__"}
+EXAMPLE_DIRS = {"examples", "example", "samples", "sample"}
+EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
 STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
@@ -81,6 +83,7 @@ SIGNALS = (
     ("drex", re.compile(r"\b(systemone|system_one|drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
     ("model-call", re.compile(
         r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
+        r"\.GenerateContent\s*\(|:generateContent\b|\bGenerateFromSinglePrompt\s*\(|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
         r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"
         r"\b\w*classifier\w*\s*\.\s*(?:decide|classify|predict)\s*\(|"
@@ -117,6 +120,8 @@ LABEL_GROUP = re.compile(
     r"""(?:\s*,\s*['"][A-Za-z_][A-Za-z0-9_]{0,40}['"]){1,12}\s*,?\s*(?:\)|\])""")
 LABEL_SKIP = re.compile(r"\b(?:create_index|Index|Column|ForeignKey|UniqueConstraint)\b")
 WRAPPER_MIN_LEN = 8
+WRAPPER_DEPTH = 3
+CLIENT_NAME = re.compile(r"model|llm|completion|prompt|message|client|wrapper|gpt|converse", re.I)
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
                 "request", "response", "get_client", "get_model", "from_config", "validate"}
 
@@ -153,9 +158,8 @@ def git_state(repo):
         return None, None
 
 
-def is_test(parts, name):
-    return (any(p in TEST_DIRS for p in parts[:-1]) or name.startswith("test_")
-            or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None)
+def is_test_name(name):
+    return name.startswith("test_") or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None
 
 
 def scannable(rel, include_tests):
@@ -165,7 +169,12 @@ def scannable(rel, include_tests):
         return False
     if any(p in SKIP_DIRS or p.startswith(".") for p in parts[:-1]):
         return False
-    return include_tests or not is_test(parts, name)
+    if include_tests:
+        return True
+    if is_test_name(name):
+        return False
+    dirs = set(parts[:-1])
+    return bool(dirs & EVAL_DIRS) or not dirs & (TEST_DIRS | EXAMPLE_DIRS)
 
 
 def assign_areas(paths):
@@ -547,6 +556,12 @@ def keep_file(found):
                 or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
 
 
+def eligible_wrapper(name):
+    """A public function name that can be the repository's own model client, not a decision."""
+    return (len(name) >= WRAPPER_MIN_LEN and name not in WRAPPER_STOP
+            and not name.startswith(("_", "test")) and not DECISION_NAME.search(name))
+
+
 def wrapper_names(spans, found, lines):
     """The repository's own model client layer: public, non-decision functions in files that import a model
     library and reach a model call directly or through same-file helpers."""
@@ -555,8 +570,7 @@ def wrapper_names(spans, found, lines):
     names = set()
     for (_, qualified), kinds in by_function(spans, found, lines).items():
         name = short(qualified)
-        if (kinds & MODEL_REACH and len(name) >= WRAPPER_MIN_LEN and name not in WRAPPER_STOP
-                and not name.startswith(("_", "test")) and not DECISION_NAME.search(name)):
+        if kinds & MODEL_REACH and eligible_wrapper(name):
             names.add(name)
     return names
 
@@ -577,8 +591,11 @@ def suggested_groups(functions):
 
 
 def scan(repo, include_tests=False, groups=None):
-    """Two passes. The first finds direct signals and learns the repository's model wrappers.
-    The second marks callers of those wrappers, so decisions behind an in-house client are not missed."""
+    """Find direct signals, learn model wrappers a few layers deep, then mark their callers.
+
+    The first pass learns wrappers in files that import a model library. Each later layer
+    is a public, non-decision function with a client-style name that calls an already learned
+    wrapper and is defined once, so a decision behind two in-house layers is still listed."""
     repo = Path(repo)
     listed = list_files(repo)
     rels = [rel for rel in listed if scannable(rel, include_tests)]
@@ -602,19 +619,41 @@ def scan(repo, include_tests=False, groups=None):
             remember(rel, text, normalize_found(found))
             wrappers |= wrapper_names(spans[rel], found, text.splitlines())
     if wrappers:
-        callers, defined = [], {}
-        for rel, text in read_scannable(repo, rels):
-            for name in set(DEF_NAME.findall(text)) & wrappers:
-                defined[name] = defined.get(name, 0) + 1
-            if set(LONG_CALL.findall(text)) & wrappers:
-                callers.append(rel)
-        wrappers = {name for name in wrappers if defined.get(name, 0) <= 1}
-        pattern = re.compile(r"\b(?:" + "|".join(sorted(map(re.escape, wrappers))) + r")\s*\(") if wrappers else None
-        for rel, text in read_scannable(repo, callers if pattern else []):
-            if pattern.search(text):
+        indexed = [(rel, set(DEF_NAME.findall(text)), set(LONG_CALL.findall(text)))
+                   for rel, text in read_scannable(repo, rels)]
+        learned, pending = set(), wrappers
+        for layer in range(WRAPPER_DEPTH):
+            if not pending:
+                break
+            defined, callers = {}, []
+            for rel, defs, calls in indexed:
+                for name in defs & pending:
+                    defined[name] = defined.get(name, 0) + 1
+                if calls & pending:
+                    callers.append(rel)
+            pending = {name for name in pending if defined.get(name, 0) <= 1} - learned
+            if not pending:
+                break
+            learned |= pending
+            pattern = re.compile(r"\b(?:" + "|".join(sorted(map(re.escape, learned))) + r")\s*\(")
+            nxt = set()
+            for rel, text in read_scannable(repo, callers):
+                if not pattern.search(text):
+                    continue
                 found = line_hits(text, pattern)
                 if keep_file(found):
                     remember(rel, text, normalize_found(found))
+                if layer + 1 == WRAPPER_DEPTH:
+                    continue
+                if rel not in spans:
+                    spans[rel], _parsed = file_spans(rel, text)
+                for _start, _end, qual, fn_calls in spans[rel]:
+                    name = short(qual)
+                    if (name not in learned and eligible_wrapper(name) and CLIENT_NAME.search(name)
+                            and not PREDICATE_NAME.search(name) and fn_calls & pending):
+                        nxt.add(name)
+            pending = nxt
+        wrappers = learned
     areas = assign_areas(list(hits))
     by_area = {}
     functions_total = 0
