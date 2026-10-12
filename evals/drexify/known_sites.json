@@ -15,24 +15,96 @@
       "commit": "6b93fa0e25a926215ca7bb52a95d4db7d9d7262d",
       "language": "python",
       "sites": [
-        {"path": "lib/crewai-tools/src/crewai_tools/tools/contextualai_rerank_tool/contextual_rerank_tool.py", "line": 35, "function": "ContextualAIRerankTool._run"},
-        {"path": "lib/crewai/src/crewai/agents/planner_observer.py", "line": 113, "function": "PlannerObserver.observe"},
-        {"path": "lib/crewai/src/crewai/experimental/agent_executor.py", "line": 2580, "function": "AgentExecutor._should_replan"},
-        {"path": "lib/crewai/src/crewai/experimental/evaluation/metrics/goal_metrics.py", "line": 25, "function": "GoalAlignmentEvaluator.evaluate"},
-        {"path": "lib/crewai/src/crewai/experimental/evaluation/metrics/reasoning_metrics.py", "line": 48, "function": "ReasoningEfficiencyEvaluator.evaluate"},
-        {"path": "lib/crewai/src/crewai/experimental/evaluation/metrics/semantic_quality_metrics.py", "line": 25, "function": "SemanticQualityEvaluator.evaluate"},
-        {"path": "lib/crewai/src/crewai/experimental/evaluation/metrics/tools_metrics.py", "line": 27, "function": "ToolSelectionEvaluator.evaluate"},
-        {"path": "lib/crewai/src/crewai/experimental/evaluation/metrics/tools_metrics.py", "line": 154, "function": "ParameterExtractionEvaluator.evaluate"},
-        {"path": "lib/crewai/src/crewai/experimental/evaluation/metrics/tools_metrics.py", "line": 310, "function": "ToolInvocationEvaluator.evaluate"},
-        {"path": "lib/crewai/src/crewai/flow/conversational_mixin.py", "line": 737, "function": "_ConversationalMixin.can_answer_from_history"},
-        {"path": "lib/crewai/src/crewai/flow/conversational_mixin.py", "line": 1202, "function": "_ConversationalMixin._route_with_config"},
-        {"path": "lib/crewai/src/crewai/flow/runtime/__init__.py", "line": 3828, "function": "Flow._collapse_to_outcome"},
-        {"path": "lib/crewai/src/crewai/memory/analyze.py", "line": 204, "function": "analyze_query"},
-        {"path": "lib/crewai/src/crewai/memory/analyze.py", "line": 275, "function": "analyze_for_save"},
-        {"path": "lib/crewai/src/crewai/memory/analyze.py", "line": 333, "function": "analyze_for_consolidation"},
-        {"path": "lib/crewai/src/crewai/tasks/llm_guardrail.py", "line": 69, "function": "LLMGuardrail._validate_output"},
-        {"path": "lib/crewai/src/crewai/utilities/evaluators/crew_evaluator_handler.py", "line": 177, "function": "CrewEvaluator.evaluate"},
-        {"path": "lib/devtools/src/crewai_devtools/docs_check.py", "line": 170, "function": "_analyze_diff"}
+        {
+          "path": "lib/crewai-tools/src/crewai_tools/tools/contextualai_rerank_tool/contextual_rerank_tool.py",
+          "line": 35,
+          "function": "ContextualAIRerankTool._run"
+        },
+        {
+          "path": "lib/crewai/src/crewai/agents/planner_observer.py",
+          "line": 113,
+          "function": "PlannerObserver.observe"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/agent_executor.py",
+          "line": 2580,
+          "function": "AgentExecutor._should_replan"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/evaluation/metrics/goal_metrics.py",
+          "line": 25,
+          "function": "GoalAlignmentEvaluator.evaluate"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/evaluation/metrics/reasoning_metrics.py",
+          "line": 48,
+          "function": "ReasoningEfficiencyEvaluator.evaluate"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/evaluation/metrics/semantic_quality_metrics.py",
+          "line": 25,
+          "function": "SemanticQualityEvaluator.evaluate"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/evaluation/metrics/tools_metrics.py",
+          "line": 27,
+          "function": "ToolSelectionEvaluator.evaluate"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/evaluation/metrics/tools_metrics.py",
+          "line": 154,
+          "function": "ParameterExtractionEvaluator.evaluate"
+        },
+        {
+          "path": "lib/crewai/src/crewai/experimental/evaluation/metrics/tools_metrics.py",
+          "line": 310,
+          "function": "ToolInvocationEvaluator.evaluate"
+        },
+        {
+          "path": "lib/crewai/src/crewai/flow/conversational_mixin.py",
+          "line": 737,
+          "function": "_ConversationalMixin.can_answer_from_history"
+        },
+        {
+          "path": "lib/crewai/src/crewai/flow/conversational_mixin.py",
+          "line": 1202,
+          "function": "_ConversationalMixin._route_with_config"
+        },
+        {
+          "path": "lib/crewai/src/crewai/flow/runtime/__init__.py",
+          "line": 3828,
+          "function": "Flow._collapse_to_outcome"
+        },
+        {
+          "path": "lib/crewai/src/crewai/memory/analyze.py",
+          "line": 204,
+          "function": "analyze_query"
+        },
+        {
+          "path": "lib/crewai/src/crewai/memory/analyze.py",
+          "line": 275,
+          "function": "analyze_for_save"
+        },
+        {
+          "path": "lib/crewai/src/crewai/memory/analyze.py",
+          "line": 333,
+          "function": "analyze_for_consolidation"
+        },
+        {
+          "path": "lib/crewai/src/crewai/tasks/llm_guardrail.py",
+          "line": 69,
+          "function": "LLMGuardrail._validate_output"
+        },
+        {
+          "path": "lib/crewai/src/crewai/utilities/evaluators/crew_evaluator_handler.py",
+          "line": 177,
+          "function": "CrewEvaluator.evaluate"
+        },
+        {
+          "path": "lib/devtools/src/crewai_devtools/docs_check.py",
+          "line": 170,
+          "function": "_analyze_diff"
+        }
       ]
     },
     {
@@ -41,11 +113,235 @@
       "commit": "5522c6f44ca0ac3528b37244818fbfa39b5af470",
       "language": "typescript",
       "sites": [
-        {"path": "core/autocomplete/filtering/streamTransforms/lineStream.ts", "line": 31, "function": "isEnglishFirstLine"},
-        {"path": "core/autocomplete/filtering/streamTransforms/lineStream.ts", "line": 46, "function": "isEnglishPostExplanation"},
-        {"path": "core/context/providers/DocsContextProvider.ts", "line": 35, "function": "_rerankChunks"},
-        {"path": "core/context/retrieval/pipelines/RerankerRetrievalPipeline.ts", "line": 88, "function": "_rerank"},
-        {"path": "core/context/retrieval/repoMapRequest.ts", "line": 34, "function": "requestFilesFromRepoMap"}
+        {
+          "path": "core/autocomplete/filtering/streamTransforms/lineStream.ts",
+          "line": 31,
+          "function": "isEnglishFirstLine"
+        },
+        {
+          "path": "core/autocomplete/filtering/streamTransforms/lineStream.ts",
+          "line": 46,
+          "function": "isEnglishPostExplanation"
+        },
+        {
+          "path": "core/context/providers/DocsContextProvider.ts",
+          "line": 35,
+          "function": "_rerankChunks"
+        },
+        {
+          "path": "core/context/retrieval/pipelines/RerankerRetrievalPipeline.ts",
+          "line": 88,
+          "function": "_rerank"
+        },
+        {
+          "path": "core/context/retrieval/repoMapRequest.ts",
+          "line": 34,
+          "function": "requestFilesFromRepoMap"
+        }
+      ]
+    },
+    {
+      "name": "haystack",
+      "url": "https://github.com/deepset-ai/haystack.git",
+      "commit": "f40a80b9d19fb36471be53bc2c843aab8c7691db",
+      "language": "python",
+      "sites": [
+        {
+          "path": "haystack/components/evaluators/context_relevance.py",
+          "line": 169,
+          "function": "ContextRelevanceEvaluator.run"
+        },
+        {
+          "path": "haystack/components/evaluators/faithfulness.py",
+          "line": 157,
+          "function": "FaithfulnessEvaluator.run"
+        },
+        {
+          "path": "haystack/components/rankers/llm_ranker.py",
+          "line": 241,
+          "function": "LLMRanker.run"
+        },
+        {
+          "path": "haystack/components/rankers/llm_ranker.py",
+          "line": 311,
+          "function": "LLMRanker.run_async"
+        },
+        {
+          "path": "haystack/components/routers/llm_messages_router.py",
+          "line": 129,
+          "function": "LLMMessagesRouter.run"
+        },
+        {
+          "path": "haystack/components/routers/llm_messages_router.py",
+          "line": 174,
+          "function": "LLMMessagesRouter.run_async"
+        }
+      ]
+    },
+    {
+      "name": "mastra",
+      "url": "https://github.com/mastra-ai/mastra.git",
+      "commit": "da87b0a1629d5ffc980b434f70fe60f9445ddb1c",
+      "language": "typescript",
+      "sites": [
+        {
+          "path": "mastracode/factory/src/rules/tools.ts",
+          "line": 42,
+          "function": "createFactoryTransitionTools"
+        },
+        {
+          "path": "packages/core/src/agent/goal/scorer.ts",
+          "line": 120,
+          "function": "createGoalScorer"
+        },
+        {
+          "path": "packages/core/src/loop/network/index.ts",
+          "line": 522,
+          "function": "createNetworkLoop"
+        },
+        {
+          "path": "packages/core/src/loop/network/validation.ts",
+          "line": 481,
+          "function": "runDefaultCompletionCheck"
+        },
+        {
+          "path": "packages/core/src/processors/processors/language-detector.ts",
+          "line": 296,
+          "function": "detectLanguage"
+        },
+        {
+          "path": "packages/core/src/processors/processors/model-selection.ts",
+          "line": 305,
+          "function": "processInput"
+        },
+        {
+          "path": "packages/core/src/processors/processors/moderation.ts",
+          "line": 305,
+          "function": "moderateContent"
+        },
+        {
+          "path": "packages/core/src/processors/processors/prompt-injection-detector.ts",
+          "line": 270,
+          "function": "detectPromptInjection"
+        },
+        {
+          "path": "packages/evals/src/scorers/code/tone/index.ts",
+          "line": 9,
+          "function": "createToneScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/answer-relevancy/index.ts",
+          "line": 32,
+          "function": "createAnswerRelevancyScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/answer-similarity/index.ts",
+          "line": 69,
+          "function": "createAnswerSimilarityScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/bias/index.ts",
+          "line": 19,
+          "function": "createBiasScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/context-precision/index.ts",
+          "line": 54,
+          "function": "createContextPrecisionScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/context-recall/index.ts",
+          "line": 54,
+          "function": "createContextRecallScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/context-relevance/index.ts",
+          "line": 66,
+          "function": "createContextRelevanceScorerLLM"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/faithfulness/index.ts",
+          "line": 29,
+          "function": "createFaithfulnessScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/hallucination/index.ts",
+          "line": 39,
+          "function": "createHallucinationScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/multi-turn-judge/index.ts",
+          "line": 76,
+          "function": "createMultiTurnJudgeScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/noise-sensitivity/index.ts",
+          "line": 61,
+          "function": "createNoiseSensitivityScorerLLM"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/prompt-alignment/index.ts",
+          "line": 90,
+          "function": "createPromptAlignmentScorerLLM"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/rubric/index.ts",
+          "line": 172,
+          "function": "createRubricScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/summarization/index.ts",
+          "line": 186,
+          "function": "createSummarizationScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/tool-call-accuracy/index.ts",
+          "line": 32,
+          "function": "createToolCallAccuracyScorerLLM"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/toxicity/index.ts",
+          "line": 13,
+          "function": "createToxicityScorer"
+        },
+        {
+          "path": "packages/evals/src/scorers/llm/trajectory/index.ts",
+          "line": 113,
+          "function": "createTrajectoryAccuracyScorerLLM"
+        },
+        {
+          "path": "packages/memory/src/processors/observational-memory/date-utils.ts",
+          "line": 315,
+          "function": "isFutureIntentObservation"
+        },
+        {
+          "path": "packages/rag/src/rerank/index.ts",
+          "line": 90,
+          "function": "executeRerank"
+        }
+      ]
+    },
+    {
+      "name": "spring-ai",
+      "url": "https://github.com/spring-projects/spring-ai.git",
+      "commit": "a38dc95e0c7f27852ee695cad7d9d66d59c54dab",
+      "language": "java",
+      "sites": [
+        {
+          "path": "spring-ai-client-chat/src/main/java/org/springframework/ai/chat/client/advisor/SafeGuardAdvisor.java",
+          "line": 110,
+          "function": "containsSensitiveWord"
+        },
+        {
+          "path": "spring-ai-client-chat/src/main/java/org/springframework/ai/chat/evaluation/FactCheckingEvaluator.java",
+          "line": 132,
+          "function": "evaluate"
+        },
+        {
+          "path": "spring-ai-client-chat/src/main/java/org/springframework/ai/chat/evaluation/RelevancyEvaluator.java",
+          "line": 72,
+          "function": "evaluate"
+        }
       ]
     }
   ]

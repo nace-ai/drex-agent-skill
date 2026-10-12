@@ -34,7 +34,7 @@ TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
 STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
-FUNCTION_STRONG = DIRECT | {"wrapper-call", "task-output"}
+FUNCTION_STRONG = DIRECT | {"wrapper-call", "task-output", "word-guard"}
 FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "text-rule", "local-call"}
 MODEL_REACH = {"model-call", "wrapper-call", "model-reach"}
 MAX_BYTES = 1_000_000
@@ -82,7 +82,9 @@ SIGNALS = (
     ("model-call", re.compile(
         r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
-        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(", re.I)),
+        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"
+        r"\b\w*classifier\w*\s*\.\s*(?:decide|classify|predict)\s*\(|"
+        r"new Sentiment\(|sentiment\.analyze\s*\(|SentimentIntensityAnalyzer\(|\bTextBlob\(", re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
     ("model-import", re.compile(
         r"^\s*(?:from|import)\s+(?:openai|anthropic|google\.genai|google\.generativeai|vertexai|litellm|langchain\w*|"
@@ -99,7 +101,8 @@ SIGNALS = (
                              r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\s*(?:===?|\.includes|\.startsWith|\.endsWith)|"
                              r"\bstrings\.ToLower\([^)]*\)\s*(?:==|!=)|\bstrings\.(?:Contains|HasPrefix|HasSuffix)\(strings\.ToLower|"
                              r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(|"
-                             r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(")),
+                             r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(|"
+                             r"\.some\(\s*\(?\w+\)?\s*=>\s*\w+\.test\s*\(")),
 )
 # Own kind, not a model call, so wrapper learning stays unchanged. Case-sensitive: ignore-case
 # would treat `output_json = answer...` as a schema argument.
@@ -243,20 +246,36 @@ def generic_starts(lines):
 
 
 def generic_spans(lines):
-    """Function spans for brace languages by brace depth. Without braces, a span runs to the next start."""
+    """Function spans for brace languages by brace depth. Without braces, a span runs to the next start.
+
+    Braces inside a parameter type are not the body. The body starts at the first `{` that is
+    outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function."""
     starts = generic_starts(lines)
     spans = []
     for index, (line, name) in enumerate(starts):
         limit = starts[index + 1][0] - 1 if index + 1 < len(starts) else len(lines)
-        depth, opened, end = 0, False, None
+        depth, opened, end, paren = 0, False, None, 0
         for i in range(line - 1, len(lines)):
             code = STRING_OR_COMMENT.sub("", lines[i])
+            if not opened:
+                brace_at = None
+                for ch_i, ch in enumerate(code):
+                    if ch == "(":
+                        paren += 1
+                    elif ch == ")":
+                        paren -= 1
+                    elif ch == "{" and paren <= 0:
+                        brace_at = ch_i
+                        break
+                if brace_at is None:
+                    if i - (line - 1) > 40 or i + 1 >= limit:
+                        break
+                    continue
+                code = code[brace_at:]
+                opened = True
             depth += code.count("{") - code.count("}")
-            opened = opened or "{" in code
-            if opened and depth <= 0:
+            if depth <= 0:
                 end = i + 1
-                break
-            if not opened and (i - line > 8 or i + 1 >= limit):
                 break
         end = end or limit
         body = "\n".join(lines[line - 1:end])
@@ -352,6 +371,9 @@ def normalize_found(found):
 
 
 HELPER_DECISION = re.compile(DECISION_WORDS + r"|evaluat", re.I)
+CLASS_ROLE = re.compile(r"(?:Evaluator|Ranker|Router|Classifier|Judge)$")
+ENTRY_METHODS = {"run", "run_async", "evaluate", "__call__"}
+CLASS_MODEL_KINDS = {"model-call", "wrapper-call", "model-import", "rerank"}
 
 
 def task_output_helpers(spans, lines):
@@ -364,17 +386,31 @@ def task_output_helpers(spans, lines):
     return names
 
 
+def class_entry(name, model_classes):
+    """A run or evaluate method on a judge-style class whose sibling methods call a model."""
+    if "." not in name:
+        return False
+    cls, method = name.rsplit(".", 1)
+    return method in ENTRY_METHODS and cls in model_classes and CLASS_ROLE.search(cls) is not None
+
+
 def candidate_functions(spans, found, lines):
     """Functions that look like a decision, in line order."""
     found = normalize_found(found)
     helpers = task_output_helpers(spans, lines)
     calls = {(span[0], span[2]): span[3] for span in spans}
+    grouped = by_function(spans, found, lines)
+    model_classes = {name.rsplit(".", 1)[0] for (_line, name), kinds in grouped.items()
+                     if "." in name and kinds & CLASS_MODEL_KINDS}
+    for start, _end, name, _calls in spans:
+        if (start, name) not in grouped and class_entry(name, model_classes):
+            grouped[(start, name)] = set()
     out = []
-    for (line, name), kinds in sorted(by_function(spans, found, lines).items()):
+    for (line, name), kinds in sorted(grouped.items()):
         calls_task = bool(calls.get((line, name), ()) & (helpers - {short(name)}))
         if (kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK)
                 or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)
-                or calls_task):
+                or calls_task or class_entry(name, model_classes)):
             out.append({"name": name, "line": line, "kinds": sorted(kinds - {"model-reach"})})
     return out
 
@@ -406,9 +442,81 @@ def label_arg_line(line):
     return before.strip() == "" or re.search(r"[(,]\s*$", before) is not None
 
 
+JUDGE_KEY = re.compile(r"(?<![\w.'\"`])judge\s*:")
+JUDGE_MODEL = re.compile(r"(?<![\w.])model\s*[,:]")
+STRUCTURED_OUTPUT = re.compile(r"(?<![\w.])structuredOutput\s*:\s*\{")
+AGENT_GENERATE = re.compile(r"\.(?:generate|generateLegacy|stream)\s*\(")
+TRY_GENERATE = re.compile(r"\btryGenerate\w*\s*\(")
+CHAT_PROMPT = re.compile(r"\.prompt\s*\(")
+CHAT_CALL = re.compile(r"\.call\s*\(")
+CHAT_BUILDER = re.compile(r"chatClientBuilder|ChatClient\s*\.\s*builder\s*\(")
+ANY_MATCH = re.compile(r"\.anyMatch\s*\(")
+CONTAINS_CALL = re.compile(r"\.contains\s*\(")
+LOWER_CALL = re.compile(r"\.toLowerCase\s*\(|\.equalsIgnoreCase\s*\(")
+ANCHOR = re.compile(r"(?<![\w.'\"`])judge\s*:|(?<![\w.])structuredOutput\s*:\s*\{")
+
+
+def nearby(lines, index, pattern, before, after):
+    """True when `pattern` hits within `before`/`after` lines, without crossing a function start."""
+    start = index
+    for _ in range(before):
+        if start == 0 or FUNC_START.match(lines[start - 1]):
+            break
+        start -= 1
+    end = index
+    for _ in range(after):
+        if end + 1 >= len(lines) or FUNC_START.match(lines[end + 1]):
+            break
+        end += 1
+    return any(pattern.search(line) for line in lines[start:end + 1])
+
+
+def judge_model_hits(lines):
+    """An object key `judge:` whose next line names a model. A later `model` field is a config payload."""
+    return {index for index, line in enumerate(lines)
+            if JUDGE_KEY.search(line) and nearby(lines, index, JUDGE_MODEL, 0, 1)}
+
+
+def structured_output_hits(lines):
+    """`structuredOutput:` beside an agent generate or stream, or a nearby tryGenerate helper."""
+    hits = set()
+    for index, line in enumerate(lines):
+        if not STRUCTURED_OUTPUT.search(line):
+            continue
+        if nearby(lines, index, AGENT_GENERATE, 8, 0) or nearby(lines, index, TRY_GENERATE, 0, 30):
+            hits.add(index)
+    return hits
+
+
+def fluent_model_hits(lines):
+    """A ChatClient builder chain `.prompt()` ... `.call()`."""
+    hits = set()
+    for index, line in enumerate(lines):
+        if not CHAT_PROMPT.search(line):
+            continue
+        if nearby(lines, index, CHAT_CALL, 0, 6) and nearby(lines, index, CHAT_BUILDER, 1, 0):
+            hits.add(index)
+    return hits
+
+
+def java_word_guard_hits(lines):
+    """`stream().anyMatch` that lowercases and `.contains` a word, the Java form of `.some(p => x.includes(p))`."""
+    hits = set()
+    for index, line in enumerate(lines):
+        if not ANY_MATCH.search(line):
+            continue
+        if nearby(lines, index, CONTAINS_CALL, 0, PHRASE_WINDOW) and nearby(lines, index, LOWER_CALL, 0, PHRASE_WINDOW):
+            hits.add(index)
+    return hits
+
+
 def line_hits(text, wrappers=None):
     lines = text.splitlines()
     phrase_hits = phrase_loop_hits(lines)
+    judge_hits = judge_model_hits(lines)
+    structured_hits = structured_output_hits(lines)
+    fluent_hits = fluent_model_hits(lines)
+    guard_hits = java_word_guard_hits(lines)
     found = []
     for number, line in enumerate(lines, 1):
         kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
@@ -417,6 +525,13 @@ def line_hits(text, wrappers=None):
         index = number - 1
         if index in phrase_hits and "text-rule" not in kinds:
             kinds.append("text-rule")
+        if index in guard_hits:
+            if "text-rule" not in kinds:
+                kinds.append("text-rule")
+            kinds.append("word-guard")
+        if index in judge_hits or index in structured_hits or index in fluent_hits:
+            if "model-call" not in kinds:
+                kinds.append("model-call")
         if label_arg_line(line):
             kinds.append("label-arg")
         if TASK_OUTPUT_ARG.search(line):
@@ -428,7 +543,8 @@ def line_hits(text, wrappers=None):
 
 def keep_file(found):
     kinds = {k for _, ks in found for k in ks}
-    return bool(kinds & STRONG or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
+    return bool(kinds & STRONG or "word-guard" in kinds
+                or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
 
 
 def wrapper_names(spans, found, lines):
@@ -479,7 +595,7 @@ def scan(repo, include_tests=False, groups=None):
         scanned += 1
         if scanned % PROGRESS_EVERY == 0:
             print(f"scanned {scanned} of {len(rels)} files", file=sys.stderr, flush=True)
-        if not ANY_SIGNAL.search(text) and not TASK_OUTPUT_ARG.search(text):
+        if not ANY_SIGNAL.search(text) and not TASK_OUTPUT_ARG.search(text) and not ANCHOR.search(text):
             continue
         found = line_hits(text)
         if keep_file(found):
