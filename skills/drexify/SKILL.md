@@ -25,7 +25,7 @@ Whether Drex is the user's default decision provider is decided by the provider 
 
 `scripts/drexify.py` sits next to this file. Resolve it relative to the real location of this SKILL.md, not the current directory. It needs Python 3.9+, uses only the standard library, reads files, and never calls a model or the network.
 
-- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --save <map.json>` searches the whole repository once for decision signals, in under a minute on a large repository. It prints a short map of areas and balanced groups, one per suggested helper, and writes the full map to `<map.json>`. An area too big for one helper is split by folder. Add `--groups <N>` to choose the number yourself.
+- `python3 "<skill-dir>/scripts/drexify.py" scan --repo <root> --save <map.json>` searches the whole repository once for decision signals, in under a minute on a large repository. It prints a short map of areas and balanced groups, one per suggested helper, and writes the full map to `<map.json>`. An area too big for one helper is split by folder. Use the suggested number. Add `--groups <N>` only when the user asks for a specific number.
 - `scan --from <map.json> --group <K>` prints group K from the saved map instantly, without searching again. The first line gives the group's totals: files, candidate functions, and files without one. Each file is followed by its candidate functions as `path:line  name  [signals]`. `--area <name>` prints one area. An area ending in `/*` means only the files directly inside that folder. It warns when the repository changed since the map was saved.
 - Candidate functions are functions that call a model, Drex, a reranker, or fuzzy matching, functions that call the repository's own model wrappers, and decision-named functions that use labels, regexes, keyword rules, model wording, or a same-file helper with one of those signals. Wrappers are learned from files that import a model library. The list is a checklist, not the answer. Some candidates are not decisions, and some decisions are not listed.
 - `python3 "<skill-dir>/scripts/drexify.py" check <report> --repo <root> --fix` checks a written report: the headline counts, the statuses, duplicates, and every `path:line` pointer. `--fix` rewrites a shortened path only when it matches exactly one file, and moves each site pointer to the first line of the function it sits in. Use `-` as the report to read it from standard input without writing anything.
@@ -46,18 +46,19 @@ Start every helper on a cheaper, faster model, and name that model explicitly wh
 
 ## What counts as one site
 
-Counting must be mechanical, so two scans of the same code give the same number.
+Counting must be mechanical, so two scans of the same code give the same number. The backend, wrapper, generation, and dead-code rules below come before the rule that the site holds the model call.
 
 - **One site is one decision function:** the function or method whose return value is the judgment, meaning a label, a yes or no, a pick from a set, or an ordered level.
 - When a judgment passes through several functions, the site is the function that contains the model call, Drex call, or rule, even when a caller is the one on the candidate list. A shared client function that only sends requests for several different judgments is a wrapper. Each function that builds its own question for it is a site.
 - Its callers, prompt, schema, parser, and settings are extra pointers on the same line, not new sites. Parsing the model's reply, for example a PASS or FAIL string, is part of the same site.
 - The same judgment in two different functions is two sites only when each function makes its own model call, Drex call, or rule, because each one migrates separately. A function that gets the judgment by calling another site is a caller, not a site.
 - Interchangeable implementations of one interface, such as a `rerank` or `classify` method on each provider class, are backends, not sites. The site is the code that calls the interface and acts on the result. List the backends as extra pointers on that line.
+- A function that mixes fixed logic with a keyword guess on free text is a site, because of the guess.
 - A model call whose main output is generated text, a plan, or extracted data is generation, even when it also returns a flag. It is a site only when the judgment is the main thing the code acts on.
 - One model call that returns several judgments at once is one site. Give the shape of the judgment the code acts on first, and name the others in the note.
 - In scope: production code and evaluation code. Out of scope: tests, fixtures, notebooks, generated code, vendored code, and archived code kept only for reference, such as an `archive/` folder.
 - Out of scope: text generation, chat, summarization, embeddings, and fixed logic. Fixed logic includes thresholds on measured numbers (lengths, counts, scores), also when the score compares two texts, such as edit distance, token overlap, or recall. It also includes schema checks, exact lookups, and patterns that recognize a format, such as a number, date, currency, ID, or markup syntax. Rules over formal input, such as shell commands, source code, error messages, file names, or model ids, are fixed logic too. A keyword list or pattern matched against free natural-language text to guess its meaning, such as intent, topic, tone, or document type, is a site.
-- Functions with no callers are not counted, and neither are functions reached only from them. Mention them in a separate note. Being public does not make a function called, and neither does a call from tests. Code that cannot run as checked in, for example because it imports a module missing from the repository, is not counted either. The one exception is a published library, where outside users are the callers. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
+- Functions with no callers are not counted, and neither are functions reached only from them. Mention them in a separate note. Being public does not make a function called, and neither does a call from tests. A branch or strategy that no production caller can select is dead too. Code that cannot run as checked in, for example because it imports a module missing from the repository, is not counted either. The one exception is a published library, where outside users are the callers. Entry points count as called: HTTP handlers, queue or workflow activities, CLI commands, and scheduled jobs.
 
 ## Pick the status
 
@@ -70,7 +71,7 @@ Use the first status that is true. Use only these four. The headline lists them 
 
 Drex code means any code that calls the Drex API, whatever the client is named. Look for the Drex host or its decision endpoints, not only the word Drex.
 
-Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level. A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
+Pick the shape from the branch the code takes: `noul` for yes or no, `choice` for one of a fixed set, `score` for an ordered level. A numeric rating, such as 0 to 10, maps to `score` with named levels. A reranker or relevance score maps to `score` with concrete relevance levels, or to `choice` when only the top candidate is used.
 
 ## Report the summary
 
