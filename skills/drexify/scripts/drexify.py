@@ -60,11 +60,13 @@ FUNC_START = re.compile(
     r"|fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(?P<kt>\w+)"
     r"|(?:const|let|var)\s+(?P<arrow>\w+)\s*(?::[^=]+)?=\s*(?:async\s+)?"
     r"(?:function\b|(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)[^=]*=>|(?:<[^>]*>)?\s*\(\s*$|\w+\s*=>)"
-    r"|(?:(?:get|set)\s+)?(?:" + TYPE_TOKEN + r")?(?P<method>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*"
+    r"|(?:(?:get|set)\s+)?(?:\*\s*)?(?:" + TYPE_TOKEN + r")?(?P<method>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*"
     r"\((?:[^()]|\([^()]*\))*\)\s*(?::\s*[^{=;]+)?(?:throws\s+[\w., ]+)?\s*\{\s*$"
     r"|(?:(?:public|private|protected|static|async|override|internal)\s+)+(?:" + TYPE_TOKEN + r")?"
     r"(?P<open>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$"
     r")")
+OPEN_SIGNATURE = re.compile(r"^\s*" + MODIFIERS + r"(?:\*\s*)?(?P<name>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$")
+SIGNATURE_CLOSE = re.compile(r"^\s*\)\s*(?::\s*[^{=;]+)?\s*\{\s*$")
 CALL_NAME = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
 CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
@@ -199,14 +201,28 @@ def python_spans(text):
         return None
 
 
+def signature_closes(lines, number):
+    """True when a parameter list opened on line `number` closes with `) {` before any statement ends,
+    which separates a multi-line method signature from a multi-line call."""
+    for line in lines[number:number + 15]:
+        if SIGNATURE_CLOSE.match(line):
+            return True
+        if line.rstrip().endswith((";", "}")) or line.strip().startswith(")"):
+            return False
+    return False
+
+
 def generic_starts(lines):
     starts = []
     for number, line in enumerate(lines, 1):
         match = FUNC_START.match(line)
         if match:
             name = next(v for v in match.groupdict().values() if v)
-            if name not in NOT_FUNCTIONS:
-                starts.append((number, name))
+        else:
+            opened = OPEN_SIGNATURE.match(line)
+            name = opened.group("name") if opened and signature_closes(lines, number) else None
+        if name and name not in NOT_FUNCTIONS:
+            starts.append((number, name))
     return starts
 
 

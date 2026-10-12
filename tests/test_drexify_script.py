@@ -284,6 +284,13 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual(result["problems"], [])
         self.assertIn("route.py:1`):\n  candidate", path.read_text())
 
+    def test_typescript_generator_and_multiline_methods(self):
+        text = ("class Azure {\n  async *chatStream(\n    body: Body,\n    signal: AbortSignal,\n  ): AsyncGenerator<Chunk> {\n"
+                "    const r = await this.openai.chat.completions.create(body);\n  }\n\n"
+                "  completion(\n    body: Body,\n  ) {\n    return 1;\n  }\n\n"
+                "  run() {\n    doThing(\n      a,\n    );\n    if (\n      x\n    ) {\n      y();\n    }\n  }\n}\n")
+        self.assertEqual([n for _, n in drexify.generic_starts(text.splitlines())], ["chatStream", "completion", "run"])
+
     def test_fenced_site_lines_are_not_counted(self):
         path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n- Route (`services/search/app/route.py:1`): candidate.\n\n"
                            "```text\n- Copy (`services/search/app/route.py:1`): candidate.\n```\n")
