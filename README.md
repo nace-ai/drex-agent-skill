@@ -96,7 +96,11 @@ ln -s "$HOME/drex-agent-skills/skills/drexify" ~/.cursor/skills/drexify
 
 For Cursor Cloud Agents, put both skills in the repository's `.cursor/skills/drex-for-harness/` and `.cursor/skills/drexify/`, or enable Cursor's Skills Sync for personal skills.
 
-Cursor opened from the Dock does not see a key you exported in a separate terminal. Put the same `export DREX_API_KEY='paste-your-key-here'` line in `~/.zshrc` or `~/.bashrc`, then restart Cursor. Cursor's agent terminal reads that file.
+Cursor opened from the Dock does not see a key you exported in a separate terminal. Put the same `export DREX_API_KEY='paste-your-key-here'` line in `~/.zshrc` or `~/.bashrc`, then restart Cursor. Cursor's agent terminal reads that file. To keep the key out of a plain-text file on macOS, store it once with `security add-generic-password -a "$USER" -s drex -w` and put this line in the file instead:
+
+```bash
+export DREX_API_KEY="$(security find-generic-password -a "$USER" -s drex -w)"
+```
 
 Restart Cursor after installation to load Drex. Configure `DREX_API_KEY` in the cloud agent's environment if using Cursor Cloud Agents.
 
