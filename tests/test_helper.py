@@ -185,8 +185,8 @@ class CredentialTests(OfflineTestCase):
     def test_malformed_environment_keys_are_rejected_without_echo_or_prompt(self):
         malformed = ["", "SYNTHETIC_INVALID_KEY", "nace_sk_" + "a" * 42,
                      "nace_sk_" + "a" * 44, "nace_sk_" + "!" * 43,
-                     "nace_sk_" + "é" * 43, SYNTHETIC_KEY + "\n",
-                     " " + SYNTHETIC_KEY, SYNTHETIC_KEY + " "]
+                     "nace_sk_" + "é" * 43, SYNTHETIC_KEY[:20] + "\n" + SYNTHETIC_KEY[20:],
+                     SYNTHETIC_KEY[:20] + " " + SYNTHETIC_KEY[20:]]
         self.stdin.isatty.return_value = True
         for index, key in enumerate(malformed):
             with self.subTest(case=index):
@@ -194,6 +194,25 @@ class CredentialTests(OfflineTestCase):
                 self.assert_failure(self.invoke(["check"]), key)
         self.prompt.assert_not_called()
         self.network.assert_not_called()
+
+    def test_surrounding_whitespace_on_a_key_is_stripped(self):
+        wrapped = " \t" + SYNTHETIC_KEY + "\r\n"
+        os.environ["DREX_API_KEY"] = wrapped
+        self.assertEqual(drex.api_key(), SYNTHETIC_KEY)
+        self.allow_response({"models": []})
+        code, stdout, stderr = self.invoke(["check"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertNotIn(SYNTHETIC_KEY, stdout)
+        req = self.network.return_value.open.call_args.args[0]
+        self.assertEqual(req.get_header("Authorization"), "Bearer " + SYNTHETIC_KEY)
+        self.assertNotIn("\n", req.get_header("Authorization"))
+        del os.environ["DREX_API_KEY"]
+        self.stdin.isatty.return_value = True
+        self.prompt.side_effect = None
+        self.prompt.return_value = "\n" + SYNTHETIC_KEY + "\n"
+        self.assertEqual(drex.api_key(interactive=True), SYNTHETIC_KEY)
+        self.prompt.assert_called_once()
+        self.assertNotIn("DREX_API_KEY", os.environ)
 
     def test_hidden_prompt_is_ephemeral(self):
         self.stdin.isatty.return_value = True

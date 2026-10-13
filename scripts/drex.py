@@ -41,6 +41,7 @@ def api_key(interactive=False):
                 key = getpass.getpass("Drex API key (hidden, not saved): ")
             except (getpass.GetPassWarning, EOFError):
                 raise HelperError("A hidden terminal prompt is unavailable. Use a secret manager to supply DREX_API_KEY.") from None
+    key = key.strip()
     if not re.fullmatch(r"nace_sk_[A-Za-z0-9_-]{43}", key):
         raise HelperError("DREX_API_KEY has an invalid format; replace it with a key from Drex API Keys.")
     return key
