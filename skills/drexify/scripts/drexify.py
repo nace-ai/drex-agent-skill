@@ -65,7 +65,7 @@ FUNC_START = re.compile(
     r"|fn\s+(?P<rs>\w+)"
     r"|fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(?P<kt>\w+)"
     r"|(?:const|let|var)\s+(?P<arrow>\w+)\s*(?::[^=]+)?=\s*(?:async\s+)?"
-    r"(?:function\b|(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)[^=]*=>|(?:<[^>]*>)?\s*\(\s*$|\w+\s*=>)"
+    r"(?:function\b|(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)[^=]*=>|\w+\s*=>)"
     r"|(?:(?:get|set)\s+)?(?:\*\s*)?(?:" + TYPE_TOKEN + r")?(?P<method>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*"
     r"\((?:[^()]|\([^()]*\))*\)\s*(?::\s*[^{=;]+)?(?:throws\s+[\w., ]+)?\s*\{\s*$"
     r"|(?:(?:public|private|protected|static|async|override|internal)\s+)+(?:" + TYPE_TOKEN + r")?"
@@ -73,6 +73,9 @@ FUNC_START = re.compile(
     r")")
 OPEN_SIGNATURE = re.compile(r"^\s*" + MODIFIERS + r"(?:\*\s*)?(?P<name>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$")
 SIGNATURE_CLOSE = re.compile(r"^\s*\)\s*(?::\s*[^{=;]+)?\s*\{\s*$")
+ARROW_OPEN = re.compile(
+    r"^\s*" + MODIFIERS + r"(?:const|let|var)\s+(?P<name>\w+)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:<[^>]*>\s*)?\(\s*$")
+ARROW_CLOSE = re.compile(r"^\s*\)\s*(?::\s*[^{=;\n]+)?\s*=>")
 CALL_NAME = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
 CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
@@ -260,15 +263,148 @@ def signature_closes(lines, number):
     return False
 
 
+def mask_templates(lines):
+    """Blank template literals and block comments so a prompt cannot look like code."""
+    out, mode, depth = [], None, 0
+    for line in lines:
+        buf, i, n = [], 0, len(line)
+        while i < n:
+            if mode == "/*":
+                if line.startswith("*/", i):
+                    mode = None
+                    buf.append("  ")
+                    i += 2
+                else:
+                    buf.append(" ")
+                    i += 1
+                continue
+            if mode == "`" and depth == 0:
+                if line[i] == "\\" and i + 1 < n:
+                    buf.append("  ")
+                    i += 2
+                    continue
+                if line.startswith("${", i):
+                    depth = 1
+                    buf.append("  ")
+                    i += 2
+                    continue
+                if line[i] == "`":
+                    mode = None
+                buf.append(" ")
+                i += 1
+                continue
+            if mode == "`":
+                if line[i] == "{":
+                    depth += 1
+                elif line[i] == "}":
+                    depth -= 1
+                buf.append(line[i] if depth else " ")
+                i += 1
+                continue
+            if line[i] in "'\"":
+                quote = line[i]
+                buf.append(" ")
+                i += 1
+                while i < n:
+                    if line[i] == "\\" and i + 1 < n:
+                        buf.append("  ")
+                        i += 2
+                        continue
+                    if line[i] == quote:
+                        buf.append(" ")
+                        i += 1
+                        break
+                    buf.append(" ")
+                    i += 1
+                continue
+            if line.startswith("//", i):
+                buf.append(" " * (n - i))
+                break
+            if line.startswith("/*", i):
+                mode = "/*"
+                buf.append("  ")
+                i += 2
+                continue
+            if line[i] == "`":
+                mode = "`"
+                buf.append(" ")
+                i += 1
+                continue
+            buf.append(line[i])
+            i += 1
+        out.append("".join(buf))
+    return out
+
+
+def arrow_closes(lines, number):
+    for line in lines[number:number + 15]:
+        if ARROW_CLOSE.search(line):
+            return True
+        if line.rstrip().endswith((";", "{")) or (line.strip().startswith(")") and "=>" not in line):
+            return False
+    return False
+
+
+def template_end(lines, row, col):
+    """1-based line where the template that opens at lines[row][col] closes."""
+    depth, i, r = 0, col + 1, row
+    while r < len(lines) and r - row <= 400:
+        line = lines[r]
+        while i < len(line):
+            if line[i] == "\\" and i + 1 < len(line):
+                i += 2
+                continue
+            if depth == 0 and line[i] == "`":
+                return r + 1
+            if depth == 0 and line.startswith("${", i):
+                depth = 1
+                i += 2
+                continue
+            if depth:
+                if line[i] == "{":
+                    depth += 1
+                elif line[i] == "}":
+                    depth -= 1
+            i += 1
+        r += 1
+        i = 0
+    return None
+
+
+def arrow_template_end(lines, start):
+    """End line of a const arrow whose body is one template, else None."""
+    head = lines[start - 1]
+    if not re.search(r"\b(?:const|let|var)\s+\w+", head):
+        return None
+    mark = re.search(r"=>\s*`", head)
+    if mark:
+        return template_end(lines, start - 1, mark.end() - 1)
+    if not ARROW_OPEN.match(head):
+        return None
+    for offset, line in enumerate(lines[start:start + 15], 1):
+        mark = re.search(r"^\s*\)\s*(?::\s*[^{=;\n]+)?\s*=>\s*`", line)
+        if mark:
+            return template_end(lines, start - 1 + offset, mark.end() - 1)
+        if ARROW_CLOSE.search(line) or line.rstrip().endswith((";", "{")) or (
+                line.strip().startswith(")") and "=>" not in line):
+            return None
+    return None
+
+
 def generic_starts(lines):
+    visible = mask_templates(lines)
     starts = []
-    for number, line in enumerate(lines, 1):
+    for number, line in enumerate(visible, 1):
         match = FUNC_START.match(line)
         if match:
             name = next(v for v in match.groupdict().values() if v)
         else:
             opened = OPEN_SIGNATURE.match(line)
-            name = opened.group("name") if opened and signature_closes(lines, number) else None
+            if opened and signature_closes(visible, number):
+                name = opened.group("name")
+            else:
+                arrow = ARROW_OPEN.match(line)
+                name = arrow.group("name") if arrow and arrow_closes(visible, number) else None
         if name and name not in NOT_FUNCTIONS:
             starts.append((number, name))
     return starts
@@ -278,14 +414,21 @@ def generic_spans(lines):
     """Function spans for brace languages by brace depth. Without braces, a span runs to the next start.
 
     Braces inside a parameter type are not the body. The body starts at the first `{` that is
-    outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function."""
+    outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function.
+    An arrow that returns a template ends when that template ends."""
+    visible = mask_templates(lines)
     starts = generic_starts(lines)
     spans = []
     for index, (line, name) in enumerate(starts):
+        templated = arrow_template_end(lines, line)
+        if templated:
+            body = "\n".join(lines[line - 1:templated])
+            spans.append((line, templated, name, set(CALL_NAME.findall(STRING_OR_COMMENT.sub(" ", body))) - NOT_FUNCTIONS))
+            continue
         limit = starts[index + 1][0] - 1 if index + 1 < len(starts) else len(lines)
         depth, opened, end, paren = 0, False, None, 0
         for i in range(line - 1, len(lines)):
-            code = STRING_OR_COMMENT.sub("", lines[i])
+            code = STRING_OR_COMMENT.sub("", visible[i])
             if not opened:
                 brace_at = None
                 for ch_i, ch in enumerate(code):
@@ -363,6 +506,25 @@ def file_constants(lines, found, spans):
     return constants
 
 
+SIGNAL_OF = dict(SIGNALS)
+
+
+def kinds_beyond_name(line, qualified, kinds):
+    """Drop a hit that is only the function's own name on its declaration line."""
+    name = short(qualified)
+    named = [match.span() for match in re.finditer(r"\b" + re.escape(name) + r"\b", line)]
+    kept = []
+    for kind in kinds:
+        pattern = SIGNAL_OF.get(kind)
+        if pattern is None:
+            kept.append(kind)
+            continue
+        matches = list(pattern.finditer(line))
+        if not matches or any(not any(a <= match.start() and match.end() <= b for a, b in named) for match in matches):
+            kept.append(kind)
+    return kept
+
+
 def by_function(spans, found, lines):
     """{(line, qualified name): kinds} for hit lines inside a function, plus two kinds of inheritance.
 
@@ -372,7 +534,11 @@ def by_function(spans, found, lines):
     grouped = {}
     for number, kinds in found:
         owner = owner_of(spans, number)
-        if owner:
+        if not owner:
+            continue
+        if number == owner[0]:
+            kinds = kinds_beyond_name(lines[number - 1], owner[2], kinds)
+        if kinds:
             grouped.setdefault((owner[0], owner[2]), set()).update(kinds)
     constants = file_constants(lines, found, spans)
     if constants:

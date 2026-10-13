@@ -250,6 +250,7 @@ class DrexifyScriptTests(unittest.TestCase):
             "  async classifyDoc(text: string): Promise<Label> {": "classifyDoc",
             "  async classifyDoc(": "classifyDoc",
             "export const route = async (q: string) => {": "route",
+            'const fetchIt = (url = "http://example.test") => {': "fetchIt",
             "const pick = <T>(xs: T[]) => {": "pick",
             "export function triage(x) {": "triage",
             "func (s *Svc) Detect(ctx context.Context) error {": "Detect",
@@ -835,6 +836,59 @@ class DrexifyScriptTests(unittest.TestCase):
             self.assertNotIn(f"pkg/{name}", paths, name)
         for name in kept:
             self.assertIn(f"pkg/{name}", paths, name)
+
+    def test_prompt_constants_are_not_candidate_functions(self):
+        text = (
+            "const RERANK_PROMPT = (\n"
+            "  query: string,\n"
+            "  document: string,\n"
+            ") => `Is ${query} relevant to ${document}?\n"
+            "def read_root():\n"
+            "  return 1\n"
+            "fn bubble_sort() {\n"
+            "  return 1\n"
+            "}`;\n\n"
+            "const NOTES = (\n"
+            "  \"rerank these documents\"\n"
+            ");\n\n"
+            "const pick = async (q: string) => {\n"
+            "  return client.chat.completions.create({ model: \"m\" });\n"
+            "};\n\n"
+            "const send = async (\n"
+            "  q: string,\n"
+            ") => {\n"
+            "  return client.chat.completions.create({ model: \"m\" });\n"
+            "};\n\n"
+            "export async function scoreChunk(query: string) {\n"
+            "  return complete(RERANK_PROMPT(query, \"doc\"));\n"
+            "}\n"
+        )
+        starts = [name for _, name in drexify.generic_starts(text.splitlines())]
+        self.assertNotIn("read_root", starts)
+        self.assertNotIn("bubble_sort", starts)
+        self.assertNotIn("NOTES", starts)
+        self.assertIn("pick", starts)
+        self.assertIn("send", starts)
+        spans, _ = drexify.file_spans("llm.ts", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertNotIn("RERANK_PROMPT", got)
+        self.assertIn("pick", got)
+        self.assertIn("send", got)
+        self.assertIn("scoreChunk", got)
+        nested = (
+            "export function createToolCallAccuracyScorerLLM({ model }: Options) {\n"
+            "  const text = tools.map(tool => `${tool.id}`).join('\\n');\n"
+            "  return createScorer({\n"
+            "    judge: {\n"
+            "      model,\n"
+            "    },\n"
+            "  });\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("scorer.ts", nested)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(nested), nested.splitlines())]
+        self.assertEqual(got, ["createToolCallAccuracyScorerLLM"])
+        self.assertEqual(spans[0][1], len(nested.splitlines()))
 
 
 if __name__ == "__main__":
