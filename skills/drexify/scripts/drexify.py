@@ -1132,10 +1132,28 @@ def site_start(repo, rel, line, cache):
     return line, None
 
 
-def coverage_review(lines, last_site, fenced_lines):
+def coverage_text(lines, last_site, fenced_lines):
+    """The paragraph right after the site list. Fences, headings, and later bullets are not part of it."""
+    index = 0 if last_site is None else last_site + 1
+    limit = len(lines)
+    while index < limit and (index in fenced_lines or FENCE.match(lines[index]) or not lines[index].strip()):
+        index += 1
+    chunk = []
+    while index < limit:
+        if index in fenced_lines or FENCE.match(lines[index]):
+            index += 1
+            continue
+        line = lines[index]
+        if not line.strip() or HEADING.match(line) or re.match(r"\s*(?:[-*+]|\d+[.)])\s", line):
+            break
+        chunk.append(line)
+        index += 1
+    return "\n".join(chunk)
+
+
+def coverage_review(lines, last_site, fenced_lines, listed):
     """Problems and warnings for the coverage line after the counted site list."""
-    start = 0 if last_site is None else last_site + 1
-    text = "\n".join(lines[i] for i in range(start, len(lines)) if i not in fenced_lines)
+    text = coverage_text(lines, last_site, fenced_lines)
     problems, warnings = [], []
     if not COVERAGE_MENTION.search(text):
         problems.append("no coverage line after the site list. Say how many candidate functions were checked")
@@ -1150,13 +1168,21 @@ def coverage_review(lines, last_site, fenced_lines):
         other, dead = number(match.group("other")), number(match.group("dead"))
         more, site_lines = number(match.group("more")), number(match.group("lines"))
         buckets = sites + callers + other + dead
+        claimed = sites + more
         if buckets != checked:
             problems.append(f"coverage buckets sum to {buckets}, not the {checked} candidate functions checked")
-        if checked < total:
+        if checked > total:
+            problems.append(f"coverage checked {checked} candidate functions, more than the {total} in total. "
+                            f"Lower the checked count or raise the total")
+        elif checked < total:
             warnings.append(f"coverage checked {checked} of {total} candidate functions")
-        expected = sites + more
-        if site_lines != expected:
-            problems.append(f"coverage says {site_lines} site lines in total, expected {expected}")
+        if site_lines != listed:
+            problems.append(f"coverage says {site_lines} site lines in total, the list has {listed}. "
+                            f"Set the total to {listed}")
+        if claimed < site_lines:
+            problems.append(f"coverage has {sites} sites plus {more} more sites ({claimed}), "
+                            f"less than {site_lines} site lines in total. "
+                            f"Duplicates can be removed, not added")
     return problems, warnings
 
 
@@ -1273,7 +1299,7 @@ def check(report_path, repo, fix=False):
         for status in STATUSES:
             if claimed[status] != tally[status]:
                 problems.append(f"headline says {claimed[status]} {status}, the list has {tally[status]}")
-    extra, warnings = coverage_review(lines, last_site, fenced_lines)
+    extra, warnings = coverage_review(lines, last_site, fenced_lines, sites)
     problems.extend(extra)
     return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if writable else [],
             "warnings": warnings, "problems": problems}

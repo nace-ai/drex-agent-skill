@@ -347,7 +347,9 @@ class DrexifyScriptTests(unittest.TestCase):
         path = self.report("# Drexify plan\nIdentified 1 sites of drexification (0 already on Drex, 0 partial, "
                            "0 implemented now, 1 candidates)\n## Pricing plan\n" + site)
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
-        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n" + site + "## Plan\n```bash\n# run the scan\n```\n"
+        covered = ("Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+                    "0 not decisions, 0 dead. 0 more sites. 1 site line in total.\n")
+        path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n" + site + covered + "## Plan\n```bash\n# run the scan\n```\n"
                            "- Step (`services/billing/app/match.py:3`): candidate first.\n")
         self.assertEqual(drexify.check(path, self.repo)["problems"], [])
 
@@ -541,7 +543,9 @@ class DrexifyScriptTests(unittest.TestCase):
     def test_check_skips_site_shaped_lines_under_not_counted(self):
         path = self.report(
             "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
-            "- Route (`services/search/app/route.py:1`): candidate.\n\n## Not counted\n\n"
+            "- Route (`services/search/app/route.py:1`): candidate.\n"
+            "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. 0 more sites. 1 site line in total.\n\n## Not counted\n\n"
             "- Old router (`services/billing/app/match.py:3`): no callers.\n\n## Coverage\n\nRead in depth: services.\n"
             "\n## Implementation plan\n\n### Steps\n\n- Step one (`services/billing/app/match.py:3`): candidate first.\n"
             "**Order**\n- Step two (`services/billing/app/match.py:3`): candidate next.\n")
@@ -924,7 +928,21 @@ class DrexifyScriptTests(unittest.TestCase):
             "1,099 not decisions, 4 dead. Opened 95 of 95 files without one and looked around the\n"
             "candidates: 6 more sites. 54 site lines in total.\n"
         )
-        self.assertEqual(drexify.check(self.report(head + site + wrapped), self.repo)["problems"], [])
+        problems = drexify.check(self.report(head + site + wrapped), self.repo)["problems"]
+        self.assertTrue(any("54" in p and "list has 1" in p for p in problems), problems)
+        honest_wrapped = (
+            "Checked 1,212 of 1,212 candidate functions: 1 site, 108 callers, wrappers, or backends,\n"
+            "1,099 not decisions, 4 dead. Opened 95 of 95 files without one and looked around the\n"
+            "candidates: 0 more sites. 1 site line in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + honest_wrapped), self.repo)["problems"], [])
+        fenced = (
+            "```\n"
+            "Checked 9 of 9 candidate functions: 9 sites, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. 0 more sites. 9 site lines in total.\n"
+            "```\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + fenced + good), self.repo)["problems"], [])
         bad_sum = good.replace("0 not decisions", "1 not decisions")
         self.assertTrue(any("buckets sum" in p for p in drexify.check(self.report(head + site + bad_sum), self.repo)["problems"]))
         short = good.replace("Checked 1 of 1", "Checked 1 of 4")
@@ -1087,6 +1105,45 @@ class DrexifyScriptTests(unittest.TestCase):
             "}",
         ]
         self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
+
+    def test_coverage_total_matches_the_listed_site_lines(self):
+        def head(count):
+            return (f"Identified {count} sites of drexification "
+                    f"(0 already on Drex, 0 partial, 0 implemented now, {count} candidates)\n")
+
+        def write_sites(count):
+            body = []
+            for index in range(count):
+                rel = f"pkg/site{index}.py"
+                path = self.repo / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("def classify_doc(t):\n    return 1\n")
+                body.append(f"- Item {index} (`{rel}:1`): candidate.\n")
+            return "".join(body)
+
+        honest = (
+            "Checked 60 of 60 candidate functions: 48 sites, 10 callers, wrappers, or backends, "
+            "1 not decisions, 1 dead. After removing 2 duplicates, 6 more sites. "
+            "52 site lines in total.\n"
+        )
+        result = drexify.check(self.report(head(52) + write_sites(52) + honest), self.repo)
+        self.assertEqual(result["problems"], [], result["problems"])
+        over = (
+            "Checked 300 of 212 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "299 not decisions, 0 dead. 0 more sites. 1 site line in total.\n"
+        )
+        route = "- Route (`services/search/app/route.py:1`): candidate.\n"
+        problems = drexify.check(self.report(head(1) + route + over), self.repo)["problems"]
+        self.assertTrue(any("300" in problem and "212" in problem for problem in problems), problems)
+        added = (
+            "Checked 5 of 5 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "4 not decisions, 0 dead. 0 more sites. 5 site lines in total.\n"
+        )
+        problems = drexify.check(self.report(head(5) + write_sites(5) + added), self.repo)["problems"]
+        self.assertTrue(any("less than 5" in problem for problem in problems), problems)
+        plan = head(1) + route + "- Plan: revisit the candidate functions.\n"
+        problems = drexify.check(self.report(plan), self.repo)["problems"]
+        self.assertTrue(any("no coverage line" in problem for problem in problems), problems)
 
 
 if __name__ == "__main__":
