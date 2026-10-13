@@ -185,8 +185,8 @@ class CredentialTests(OfflineTestCase):
     def test_malformed_environment_keys_are_rejected_without_echo_or_prompt(self):
         malformed = ["", "SYNTHETIC_INVALID_KEY", "nace_sk_" + "a" * 42,
                      "nace_sk_" + "a" * 44, "nace_sk_" + "!" * 43,
-                     "nace_sk_" + "é" * 43, SYNTHETIC_KEY + "\n",
-                     " " + SYNTHETIC_KEY, SYNTHETIC_KEY + " "]
+                     "nace_sk_" + "é" * 43, SYNTHETIC_KEY[:20] + "\n" + SYNTHETIC_KEY[20:],
+                     SYNTHETIC_KEY[:20] + " " + SYNTHETIC_KEY[20:]]
         self.stdin.isatty.return_value = True
         for index, key in enumerate(malformed):
             with self.subTest(case=index):
@@ -194,6 +194,25 @@ class CredentialTests(OfflineTestCase):
                 self.assert_failure(self.invoke(["check"]), key)
         self.prompt.assert_not_called()
         self.network.assert_not_called()
+
+    def test_surrounding_whitespace_on_a_key_is_stripped(self):
+        wrapped = " \t" + SYNTHETIC_KEY + "\r\n"
+        os.environ["DREX_API_KEY"] = wrapped
+        self.assertEqual(drex.api_key(), SYNTHETIC_KEY)
+        self.allow_response({"models": []})
+        code, stdout, stderr = self.invoke(["check"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertNotIn(SYNTHETIC_KEY, stdout)
+        req = self.network.return_value.open.call_args.args[0]
+        self.assertEqual(req.get_header("Authorization"), "Bearer " + SYNTHETIC_KEY)
+        self.assertNotIn("\n", req.get_header("Authorization"))
+        del os.environ["DREX_API_KEY"]
+        self.stdin.isatty.return_value = True
+        self.prompt.side_effect = None
+        self.prompt.return_value = "\n" + SYNTHETIC_KEY + "\n"
+        self.assertEqual(drex.api_key(interactive=True), SYNTHETIC_KEY)
+        self.prompt.assert_called_once()
+        self.assertNotIn("DREX_API_KEY", os.environ)
 
     def test_hidden_prompt_is_ephemeral(self):
         self.stdin.isatty.return_value = True
@@ -424,15 +443,27 @@ class RequestValidationTests(OfflineTestCase):
             self.assert_private(str(caught.exception))
         self.network.assert_not_called()
 
-    def test_encoded_request_limit_is_inclusive_and_measures_bytes(self):
+    def counted_bytes(self, body):
+        payload = {"state": body["state"], "questions": body["questions"]}
+        return len(json.dumps(payload, allow_nan=False).encode("utf-8"))
+
+    def test_encoded_request_limit_counts_state_and_questions_only(self):
         body = valid_body()
         body["state"] = ""
-        overhead = len(drex.encode_request(body))
-        body["state"] = "x" * (drex.REQUEST_LIMIT - overhead)
-        self.assertEqual(len(drex.encode_request(body)), drex.REQUEST_LIMIT)
+        body["state"] = "x" * (drex.REQUEST_LIMIT - self.counted_bytes(body))
+        encoded = drex.encode_request(body)
+        self.assertEqual(self.counted_bytes(body), drex.REQUEST_LIMIT)
+        self.assertGreater(len(encoded), drex.REQUEST_LIMIT)
+        self.assertLessEqual(len(encoded) - drex.REQUEST_LIMIT, drex.MODEL_OVERHEAD_LIMIT)
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        self.allow_response(valid_response())
+        code, stdout, stderr = self.invoke(["judge"], body=body)
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["request_id"], valid_response()["request_id"])
         body["state"] += "x"
-        with self.assertRaisesRegex(drex.HelperError, "1 MiB"):
-            drex.encode_request(body)
+        self.network.reset_mock()
+        self.network.side_effect = AssertionError("Unexpected HTTP attempt in offline test")
+        self.assert_failure(self.invoke(["judge"], body=body))
         # Raw UTF-8 can fit while ensure_ascii JSON escaping exceeds the limit.
         body["state"] = "é" * (drex.REQUEST_LIMIT // 4)
         raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -450,9 +481,12 @@ class RequestValidationTests(OfflineTestCase):
 
     def test_missing_file_and_malformed_file_errors_hide_path_and_input(self):
         filename = self.folder / (PRIVATE_INPUT + ".json")
-        self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        stderr = self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        self.assertIn("not found", stderr)
+        self.assertNotIn(PRIVATE_INPUT, stderr)
         filename.write_text(PRIVATE_INPUT + SYNTHETIC_KEY, encoding="utf-8")
-        self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        stderr = self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        self.assertNotIn("not found", stderr)
         self.network.assert_not_called()
 
     def test_load_body_accepts_file_with_spaces(self):
@@ -461,6 +495,7 @@ class RequestValidationTests(OfflineTestCase):
         self.assertEqual(drex.load_body(str(filename)), valid_body())
 
     def test_raw_input_limit_for_file_and_stdin(self):
+        read_limit = drex.REQUEST_LIMIT + drex.MODEL_OVERHEAD_LIMIT
         exact = b"0" + b" " * (drex.REQUEST_LIMIT - 1)
         self.stdin.buffer = io.BytesIO(exact)
         self.assertEqual(drex.load_body("-"), 0)
@@ -469,20 +504,49 @@ class RequestValidationTests(OfflineTestCase):
         self.assertEqual(drex.load_body(str(filename)), 0)
         for source in ("-", str(filename)):
             with self.subTest(source="stdin" if source == "-" else "file"):
-                oversized = exact + b" " * 200
+                oversized = exact + b" " * (drex.MODEL_OVERHEAD_LIMIT + 50)
                 filename.write_bytes(oversized)
                 self.stdin.buffer = io.BytesIO(oversized)
                 with self.assertRaisesRegex(drex.HelperError, "1 MiB"):
                     drex.load_body(source)
                 if source == "-":
-                    self.assertEqual(self.stdin.buffer.tell(), drex.REQUEST_LIMIT + 1)
+                    self.assertEqual(self.stdin.buffer.tell(), read_limit + 1)
+        self.network.assert_not_called()
+
+    def test_documented_state_shapes_and_score_minimum(self):
+        states = ("", "plain text", "状态 café 😀", {"ticket": "T-1", "note": "😀"},
+                  ["Refund please", "Where is my order?"], None, 0, 1.5, True, False)
+        for index, state in enumerate(states):
+            with self.subTest(case=index):
+                body = valid_body()
+                body["state"] = state
+                self.assertEqual(json.loads(drex.encode_request(body))["state"], state)
+        body = valid_body()
+        body["questions"] = {
+            "only": {"type": "score", "criteria": ["only"]},
+            "label": {"type": "choice", "criteria": {"other": None}},
+            "safe": {"type": "noul", "criteria": {"true": "Yes", "note": "ignored by Drex"}},
+        }
+        self.assertEqual(json.loads(drex.encode_request(body))["questions"], body["questions"])
+        body["questions"] = {"safe": {"type": "noul", "criteria": {"note": "not a real criterion"}}}
+        self.assert_invalid_body(body)
+        body = valid_body()
+        body["questions"] = {"empty": {"type": "score", "criteria": []}}
+        self.assert_invalid_body(body)
+
+    def test_empty_stdin_is_rejected_without_traceback(self):
+        stderr = self.assert_failure(self.invoke(["judge"], raw=b""))
+        self.assertIn("valid JSON", stderr)
         self.network.assert_not_called()
 
 
 class TransportAndCheckTests(OfflineTestCase):
     def test_check_uses_only_fixed_get_models_and_does_not_echo_catalog(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        os.environ["HTTP_PROXY"] = "http://example.invalid:8080"
         os.environ["HTTPS_PROXY"] = "https://example.invalid/proxy"
+        os.environ["ALL_PROXY"] = "socks5://example.invalid"
+        os.environ["NO_PROXY"] = "*"
         opener, response = self.allow_response({"models": [PRIVATE_SERVER, SYNTHETIC_KEY]})
         code, stdout, stderr = self.invoke(["check"])
         self.assertEqual((code, stderr), (0, ""))
@@ -541,11 +605,15 @@ class TransportAndCheckTests(OfflineTestCase):
 
     def test_http_errors_and_redirects_redact_url_reason_body_and_key(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
-        expected = {401: "Authentication failed", 402: "insufficient credit",
-                    422: "Do not retry unchanged", 429: "rate limit",
-                    500: "bounded policy", 529: "unavailable"}
-        for status in (301, 302, 303, 307, 308, 400, 401, 402, 403, 404, 422,
-                       429, 500, 502, 529):
+        expected = {400: "malformed", 401: "Authentication failed",
+                    402: "insufficient credit", 403: "refused access",
+                    404: "could not find", 408: "request timed out",
+                    413: "too large", 422: "Do not retry unchanged",
+                    429: "rate limit", 500: "bounded policy",
+                    503: "temporarily unavailable", 504: "gateway timed out",
+                    529: "unavailable"}
+        for status in (301, 302, 303, 307, 308, 400, 401, 402, 403, 404, 408,
+                       413, 422, 429, 500, 502, 503, 504, 529):
             with self.subTest(status=status):
                 raw = io.BytesIO((PRIVATE_SERVER + PRIVATE_INPUT + SYNTHETIC_KEY).encode())
                 error = urllib.error.HTTPError(
@@ -629,6 +697,34 @@ class JudgeAndResponseTests(OfflineTestCase):
         self.prompt.assert_not_called()
         self.child.assert_not_called()
         self.assertEqual(list(self.folder.iterdir()), [])
+
+    def test_unknown_response_fields_are_accepted(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        result = valid_response()
+        result["region"] = "synthetic-region"
+        result["answers"]["quality"]["note"] = "synthetic-note"
+        self.allow_response(result)
+        code, stdout, stderr = self.invoke(["judge"], body=valid_body())
+        self.assertEqual((code, stderr), (0, ""))
+        parsed = json.loads(stdout)
+        self.assertEqual(parsed["region"], "synthetic-region")
+        self.assertEqual(parsed["answers"]["quality"]["note"], "synthetic-note")
+
+    def test_score_legend_that_differs_from_criteria_is_rejected(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        result = valid_response()
+        result["answers"]["quality"]["legend"] = [PRIVATE_SERVER, "medium", "high"]
+        self.allow_response(result)
+        stderr = self.assert_failure(self.invoke(["judge"], body=valid_body()))
+        self.assertIn("no decision should be consumed", stderr)
+
+    def test_server_nan_is_rejected_without_traceback(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        result = valid_response()
+        result["answers"]["quality"]["score"] = float("nan")
+        self.allow_response(result)
+        stderr = self.assert_failure(self.invoke(["judge"], body=valid_body()))
+        self.assertNotIn("nan", stderr.lower())
 
     def test_successful_response_exact_key_echo_is_redacted_everywhere(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
@@ -786,12 +882,113 @@ class JudgeAndResponseTests(OfflineTestCase):
             drex.validate_response(result, valid_body())
 
 
+def sample_catalog():
+    return {
+        "models": [
+            {
+                "name": "drex-v1.0",
+                "description": "Pinned model.\nStates up to 131,072 tokens.",
+                "release_date": "2026-09-24",
+                "alias_for": None,
+                "tier": PRIVATE_SERVER,
+            },
+            {
+                "name": "drex-latest",
+                "description": "Points to drex-v2.0. " + SYNTHETIC_KEY,
+                "release_date": "2026-10-06",
+                "alias_for": "drex-v2.0",
+            },
+        ],
+        "request_id": "req_" + "ab" * 16,
+        "note": SYNTHETIC_KEY,
+    }
+
+
+class ModelsCommandTests(OfflineTestCase):
+    def test_models_lists_catalog_without_inference_or_secrets(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY + "\n"
+        os.environ["HTTPS_PROXY"] = "https://example.invalid/proxy"
+        opener, response = self.allow_response(sample_catalog())
+        code, stdout, stderr = self.invoke(["models", "--no-input"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(stdout.splitlines(), [
+            "drex-v1.0  2026-09-24  Pinned model. States up to 131,072 tokens.",
+            "drex-latest -> drex-v2.0  2026-10-06  Points to drex-v2.0. [REDACTED]",
+        ])
+        self.assert_private(stdout)
+        self.assertNotIn(PRIVATE_SERVER, stdout)
+        req = opener.open.call_args.args[0]
+        self.assertEqual(req.full_url, "https://drex.nace.ai/v1/models")
+        self.assertEqual(req.get_method(), "GET")
+        self.assertIsNone(req.data)
+        self.assertEqual(req.get_header("Authorization"), "Bearer " + SYNTHETIC_KEY)
+        proxy, redirect = self.network.call_args.args
+        self.assertEqual(proxy.proxies, {})
+        self.assertIsInstance(redirect, drex.NoRedirect)
+        response.read.assert_called_once_with(drex.RESPONSE_LIMIT + 1)
+        self.prompt.assert_not_called()
+        self.child.assert_not_called()
+
+    def test_models_accepts_extra_fields_and_an_empty_list(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        payload = sample_catalog()
+        del payload["request_id"]
+        self.allow_response(payload)
+        code, stdout, stderr = self.invoke(["models"])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(len(stdout.splitlines()), 2)
+        self.allow_response({"models": [], "unrelated": {"secret": SYNTHETIC_KEY}})
+        code, stdout, stderr = self.invoke(["models", "--no-input"])
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+
+    def test_models_missing_list_and_bad_entries_are_not_echoed(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        for catalog in (None, [], {}, {"request_id": SYNTHETIC_KEY}, "models"):
+            with self.subTest(catalog_type=type(catalog).__name__):
+                self.allow_response(catalog)
+                stderr = self.assert_failure(self.invoke(["models", "--no-input"]))
+                self.assertIn("missing the models list", stderr)
+        bad = sample_catalog()
+        bad["models"] = {"name": SYNTHETIC_KEY}
+        self.allow_response(bad)
+        stderr = self.assert_failure(self.invoke(["models", "--no-input"]))
+        self.assertIn("unexpected model catalog", stderr)
+        bad["models"] = [{
+            "name": "drex-v1.0",
+            "description": PRIVATE_SERVER + SYNTHETIC_KEY,
+            "release_date": "2026-09-24",
+        }]
+        self.allow_response(bad)
+        self.assert_failure(self.invoke(["models", "--no-input"]))
+        bad["models"] = [{
+            "name": " ",
+            "description": PRIVATE_INPUT,
+            "release_date": "2026-09-24",
+            "alias_for": "",
+        }]
+        self.allow_response(bad)
+        self.assert_failure(self.invoke(["models", "--no-input"]))
+
+    def test_models_no_input_never_prompts_and_prompt_is_not_saved(self):
+        self.stdin.isatty.return_value = True
+        self.assert_failure(self.invoke(["models", "--no-input"]))
+        self.prompt.assert_not_called()
+        self.network.assert_not_called()
+        self.prompt.side_effect = None
+        self.prompt.return_value = SYNTHETIC_KEY
+        self.allow_response({"models": []})
+        code, stdout, stderr = self.invoke(["models"])
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+        self.assertNotIn("DREX_API_KEY", os.environ)
+        self.prompt.assert_called_once()
+
+
 class CliHelpTests(OfflineTestCase):
     def test_real_subprocess_help_is_local_and_requires_no_credentials(self):
         # Do not use the patched subprocess entry point: these are the only real
         # child processes in this suite and can only run argparse --help.
         for args in (["--help"], ["run", "--help"], ["check", "--help"],
-                     ["judge", "--help"]):
+                     ["models", "--help"], ["judge", "--help"]):
             with self.subTest(args=args):
                 result = REAL_SUBPROCESS_RUN(
                     [sys.executable, "-B", str(SCRIPT)] + args,

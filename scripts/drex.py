@@ -15,6 +15,7 @@ import urllib.request
 
 BASE_URL = "https://drex.nace.ai"
 REQUEST_LIMIT = 1048576
+MODEL_OVERHEAD_LIMIT = 1024
 RESPONSE_LIMIT = 8 * 1048576
 
 
@@ -40,6 +41,7 @@ def api_key(interactive=False):
                 key = getpass.getpass("Drex API key (hidden, not saved): ")
             except (getpass.GetPassWarning, EOFError):
                 raise HelperError("A hidden terminal prompt is unavailable. Use a secret manager to supply DREX_API_KEY.") from None
+    key = key.strip()
     if not re.fullmatch(r"nace_sk_[A-Za-z0-9_-]{43}", key):
         raise HelperError("DREX_API_KEY has an invalid format; replace it with a key from Drex API Keys.")
     return key
@@ -70,17 +72,26 @@ def encode_request(body):
             if not isinstance(criteria, list) or not criteria or any(not isinstance(v, str) for v in criteria):
                 raise HelperError("score criteria must be a non-empty array of strings.")
         elif kind == "noul":
-            if criteria is not None and (not isinstance(criteria, dict) or any(k not in ("true", "false") or not isinstance(v, (str, type(None))) for k, v in criteria.items())):
+            if criteria is not None and not isinstance(criteria, dict):
                 raise HelperError("noul criteria may contain true/false descriptions as strings or null.")
-            if not instructions.strip() and not any(v and v.strip() for v in (criteria or {}).values()):
+            described = criteria or {}
+            for label in ("true", "false"):
+                if label in described and not isinstance(described[label], (str, type(None))):
+                    raise HelperError("noul criteria may contain true/false descriptions as strings or null.")
+            if not instructions.strip() and not any(
+                    isinstance(described.get(label), str) and described[label].strip()
+                    for label in ("true", "false")):
                 raise HelperError("noul needs a non-empty instruction or criterion.")
         else:
             raise HelperError("Question type must be choice, noul, or score.")
     try:
         encoded = json.dumps(body, allow_nan=False).encode("utf-8")
+        counted = json.dumps(
+            {"state": body["state"], "questions": body["questions"]}, allow_nan=False,
+        ).encode("utf-8")
     except (ValueError, TypeError):
         raise HelperError("Request must contain valid, finite JSON values.") from None
-    if len(encoded) > REQUEST_LIMIT:
+    if len(counted) > REQUEST_LIMIT:
         raise HelperError("Request exceeds the hosted 1 MiB JSON limit.")
     return encoded
 
@@ -98,11 +109,18 @@ def request(key, path, data=None):
             raw = response.read(RESPONSE_LIMIT + 1)
     except urllib.error.HTTPError as error:
         messages = {
+            400: "Drex rejected the request as malformed. Do not retry unchanged.",
             401: "Authentication failed; check or replace your Drex key.",
             402: "Drex account has insufficient credit.",
+            403: "Drex refused access to this resource. Do not retry unchanged.",
+            404: "Drex could not find that resource. Do not retry unchanged.",
+            408: "The request timed out before Drex finished it. Retry later with a bounded policy.",
+            413: "Drex rejected the request as too large. Do not retry unchanged.",
             422: "Drex rejected the request; check fields, model, and context limits. Do not retry unchanged.",
             429: "Drex rate limit reached; retry later according to the service retry policy.",
             500: "Drex encountered a service error; retry only with a bounded policy.",
+            503: "Drex is temporarily unavailable. Retry later with a bounded policy.",
+            504: "Drex gateway timed out. Retry later with a bounded policy.",
             529: "Drex is unavailable; retry later or queue for review.",
         }
         raise HelperError(messages.get(error.code, "Drex returned an unexpected HTTP status (redirects are not followed).")) from None
@@ -114,6 +132,30 @@ def request(key, path, data=None):
         return json.loads(raw)
     except (ValueError, UnicodeError):
         raise HelperError("Drex returned invalid JSON.") from None
+
+
+def model_lines(result, key):
+    if not isinstance(result, dict) or "models" not in result:
+        raise HelperError("Drex model catalog is missing the models list.")
+    models = result["models"]
+    if not isinstance(models, list):
+        raise HelperError("Drex returned an unexpected model catalog.")
+    lines = []
+    for model in models:
+        if not isinstance(model, dict) or "alias_for" not in model:
+            raise HelperError("Drex returned an unexpected model catalog.")
+        name = model.get("name")
+        description = model.get("description")
+        released = model.get("release_date")
+        alias = model["alias_for"]
+        if (not isinstance(name, str) or not name.strip()
+                or not isinstance(description, str) or not isinstance(released, str)
+                or (alias is not None and (not isinstance(alias, str) or not alias.strip()))):
+            raise HelperError("Drex returned an unexpected model catalog.")
+        head = name if alias is None else name + " -> " + alias
+        line = (head + "  " + released + "  " + description).replace("\r", " ").replace("\n", " ")
+        lines.append(line.replace(key, "[REDACTED]"))
+    return lines
 
 
 def number(value, low, high):
@@ -164,15 +206,20 @@ def validate_response(result, body):
 
 
 def load_body(filename):
+    read_limit = REQUEST_LIMIT + MODEL_OVERHEAD_LIMIT
     try:
         if filename == "-":
-            raw = sys.stdin.buffer.read(REQUEST_LIMIT + 1)
+            raw = sys.stdin.buffer.read(read_limit + 1)
         else:
             with Path(filename).open("rb") as file:
-                raw = file.read(REQUEST_LIMIT + 1)
-        if len(raw) > REQUEST_LIMIT:
+                raw = file.read(read_limit + 1)
+        if len(raw) > read_limit:
             raise HelperError("Request file exceeds 1 MiB.")
         return json.loads(raw)
+    except FileNotFoundError:
+        raise HelperError("Request file was not found.") from None
+    except HelperError:
+        raise
     except (OSError, ValueError, UnicodeError):
         raise HelperError("Could not read a valid JSON request; input content is not logged.") from None
 
@@ -184,6 +231,8 @@ def main(argv=None):
     run.add_argument("command", nargs=argparse.REMAINDER, help="-- claude (or another trusted command)")
     check = sub.add_parser("check", help="Validate credentials using GET /v1/models; no inference charge")
     check.add_argument("--no-input", action="store_true", help="Never prompt; use for agent tools and automation")
+    listing = sub.add_parser("models", help="List models using GET /v1/models; no inference charge")
+    listing.add_argument("--no-input", action="store_true", help="Never prompt; use for agent tools and automation")
     judge = sub.add_parser("judge", help="Send one JSON request to hosted Drex; inference is billable")
     judge.add_argument("--input", default="-", help="JSON file, or - for stdin (default)")
     args = parser.parse_args(argv)
@@ -206,6 +255,10 @@ def main(argv=None):
             if not isinstance(result, dict) or not isinstance(result.get("models"), list):
                 raise HelperError("Drex returned an unexpected model catalog.")
             print("Drex authentication verified. No inference request made; credit availability was not checked.")
+        elif args.action == "models":
+            key = api_key(interactive=not args.no_input)
+            for line in model_lines(request(key, "/v1/models"), key):
+                print(line)
         else:
             body = load_body(args.input)
             data = encode_request(body)
