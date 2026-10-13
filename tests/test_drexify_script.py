@@ -797,6 +797,26 @@ class DrexifyScriptTests(unittest.TestCase):
             for rel in kept:
                 self.assertIn(rel, paths, include_tests)
 
+    def test_source_test_roots_are_not_reopened_by_an_evaluation_package(self):
+        scanned = "src/main/java/com/acme/evaluation/Ranker.java"
+        hidden = (
+            "src/test/java/com/acme/evaluation/EvalRanker.java",
+            "src/androidTest/java/com/acme/evaluation/Ranker.java",
+            "src/integrationTest/kotlin/com/acme/evaluation/Ranker.kt",
+            "src/testFixtures/java/com/acme/evaluation/Ranker.java",
+        )
+        text = "void evaluate() { client.chat.completions.create(model); }\n"
+        for rel in (scanned,) + hidden:
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn(scanned, paths)
+        for rel in hidden:
+            self.assertNotIn(rel, paths)
+        with_tests = {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]}
+        self.assertIn(hidden[0], with_tests)
+
 
 if __name__ == "__main__":
     unittest.main()

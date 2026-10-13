@@ -34,6 +34,7 @@ TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata
 FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 MIGRATION_DIRS = {"alembic", "migrations", "flyway"}
+SOURCE_TEST_ROOTS = {"test", "androidTest", "integrationTest", "testFixtures"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
 STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
@@ -163,6 +164,10 @@ def is_test_name(name):
     return name.startswith("test_") or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None
 
 
+def under_source_test_root(dirs):
+    return any(dirs[i] == "src" and dirs[i + 1] in SOURCE_TEST_ROOTS for i in range(len(dirs) - 1))
+
+
 def is_migration(parts):
     dirs = parts[:-1]
     if any(part in MIGRATION_DIRS for part in dirs):
@@ -182,7 +187,7 @@ def scannable(rel, include_tests):
     if include_tests:
         return True
     dirs = parts[:-1]
-    if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs):
+    if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs) or under_source_test_root(dirs):
         return False
     last_test = max((i for i, p in enumerate(dirs) if p in TEST_DIRS), default=-1)
     return last_test < 0 or any(p in EVAL_DIRS for p in dirs[last_test + 1:])
