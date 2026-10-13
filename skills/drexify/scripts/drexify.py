@@ -890,6 +890,27 @@ def guarded_text(repo, rel):
         return None
 
 
+def prefer_real_paths(repo, rels):
+    """One path per resolved file. A real path wins over a symlink to the same file."""
+    groups, order = {}, []
+    for rel in rels:
+        path = repo / rel
+        try:
+            key = path.resolve().as_posix()
+        except (OSError, RuntimeError):
+            key = "unresolved:" + rel
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append((rel, path))
+    kept = []
+    for key in order:
+        plain = [rel for rel, path in groups[key] if not path.is_symlink()]
+        pool = plain or [rel for rel, _path in groups[key]]
+        kept.append(sorted(pool)[0])
+    return kept
+
+
 def read_scannable(repo, rels):
     for rel in rels:
         text = guarded_text(repo, rel)
@@ -909,7 +930,7 @@ def scan(repo, include_tests=False, groups=None):
     wrapper and is defined once, so a decision behind two in-house layers is still listed."""
     repo = Path(repo)
     listed = list_files(repo)
-    rels = [rel for rel in listed if scannable(rel, include_tests)]
+    rels = prefer_real_paths(repo, [rel for rel in listed if scannable(rel, include_tests)])
     hits, texts, spans, wrappers, scanned, fallbacks = {}, {}, {}, set(), 0, 0
 
     def remember(rel, text, found):
