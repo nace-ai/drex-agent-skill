@@ -553,14 +553,23 @@ def generic_spans(lines):
     return spans
 
 
+def split_lines(text):
+    """Lines the way git, editors, and ast count them: only \\n, after \\r\\n and \\r fold into \\n."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def file_spans(rel, text):
     """(spans, parsed) where parsed is False when a Python file fell back to the generic finder."""
     if rel.endswith(".py"):
         spans = python_spans(text)
         if spans is not None:
             return spans, True
-        return generic_spans(text.splitlines()), False
-    return generic_spans(text.splitlines()), True
+        return generic_spans(split_lines(text)), False
+    return generic_spans(split_lines(text)), True
 
 
 def owner_of(spans, number):
@@ -804,7 +813,7 @@ def java_word_guard_hits(lines):
 
 
 def line_hits(text, wrappers=None):
-    lines = text.splitlines()
+    lines = split_lines(text)
     phrase_hits = phrase_loop_hits(lines)
     judge_hits = judge_model_hits(lines)
     structured_hits = structured_output_hits(lines)
@@ -919,7 +928,7 @@ def scan(repo, include_tests=False, groups=None):
         found = line_hits(text)
         if keep_file(found):
             remember(rel, text, normalize_found(found))
-            wrappers |= wrapper_names(spans[rel], found, text.splitlines())
+            wrappers |= wrapper_names(spans[rel], found, split_lines(text))
     if wrappers:
         indexed = [(rel, set(DEF_NAME.findall(text)), set(LONG_CALL.findall(text)))
                    for rel, text in read_scannable(repo, rels)]
@@ -962,7 +971,7 @@ def scan(repo, include_tests=False, groups=None):
     for rel, found in sorted(hits.items()):
         entry = by_area.setdefault(areas[rel], {"files": [], "hits": 0, "functions": 0})
         kinds = sorted({k for _, ks in found for k in ks})
-        functions = candidate_functions(spans.pop(rel), found, texts.pop(rel).splitlines())
+        functions = candidate_functions(spans.pop(rel), found, split_lines(texts.pop(rel)))
         entry["files"].append({"path": rel, "kinds": kinds, "functions": functions,
                                "lines": [n for n, _ in found[:MAX_LINES_PER_FILE]], "hits": len(found)})
         entry["hits"] += len(found)
@@ -1083,7 +1092,7 @@ def line_counts(repo, files, cache):
     def count(rel):
         if rel not in cache:
             text = guarded_text(repo, rel)
-            cache[rel] = None if text is None else len(text.splitlines())
+            cache[rel] = None if text is None else len(split_lines(text))
         return cache[rel]
     return count
 
@@ -1157,7 +1166,7 @@ def site_start(repo, rel, line, cache):
         return line, None
     if rel not in cache:
         text = guarded_text(repo, rel)
-        cache[rel] = None if text is None else (*file_spans(rel, text), text.splitlines())
+        cache[rel] = None if text is None else (*file_spans(rel, text), split_lines(text))
     if cache[rel] is None:
         return line, f"cannot read {rel}"
     spans, parsed, lines = cache[rel]
@@ -1260,7 +1269,7 @@ def check(report_path, repo, fix=False):
             return f"`{full}:{line}{match.group('tail')}`"
         return match.group(0)
 
-    lines = POINTER.sub(repl, text).split("\n")
+    lines = split_lines(POINTER.sub(repl, text))
     tally = {s: 0 for s in STATUSES}
     seen, spans_cache, fenced_lines = {}, {}, set()
     sites = 0

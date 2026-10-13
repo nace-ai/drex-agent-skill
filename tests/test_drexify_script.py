@@ -1142,6 +1142,22 @@ class DrexifyScriptTests(unittest.TestCase):
         ]
         self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
 
+    def test_line_numbers_follow_newlines_only(self):
+        text = 'note = "a\fb\u2028c"\n\ndef classify_doc(t):\n    return client.chat.completions.create(model="m")\n'
+        path = self.repo / "feed.py"
+        path.write_text(text)
+        result = drexify.scan(self.repo)
+        files = {item["path"]: item for area in result["areas"].values() for item in area["files"]}
+        self.assertIn("feed.py", files)
+        self.assertEqual(files["feed.py"]["functions"][0]["line"], 3)
+        body = (
+            "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+            "- Classify (`feed.py:3`): candidate.\n"
+            "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. 0 more sites. 1 site line in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(body), self.repo)["problems"], [])
+
     def test_check_does_not_read_unsafe_pointers(self):
         outside = Path(self.tmp.name) / "outside.py"
         outside.write_text("def classify_doc(t):\n    return 1\n")
