@@ -1397,6 +1397,8 @@ def check(report_path, repo, fix=False):
         seen.setdefault(ptr, number)
 
     new_text = "\n".join(lines)
+    if text.endswith("\n") or text.endswith("\r"):
+        new_text += "\n"
     if writable and new_text != text:
         Path(report_path).write_text(new_text, encoding="utf-8")
     if not writable and fixed:
