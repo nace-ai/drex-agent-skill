@@ -841,15 +841,21 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertIn(hidden[0], with_tests)
 
     def test_test_file_names_cover_vitest_e2e_bench_and_jvm(self):
+        self.assertTrue(drexify.scannable("pkg/a.vitest.cjs", include_tests=True))
+        self.assertFalse(drexify.scannable("pkg/a.vitest.cjs", include_tests=False))
+        for rel in ("pkg/helper.cjs", "pkg/helper.mts", "pkg/helper.cts"):
+            self.assertTrue(drexify.scannable(rel, include_tests=False), rel)
         skipped = (
             "models.vitest.ts", "lineStream.vitest.tsx", "a.vitest.js", "a.vitest.mjs", "a.vitest.cjs",
+            "a.vitest.mts", "a.vitest.cts",
             "flow.e2e.ts", "parse.bench.js", "foo_test.go", "test_foo.py", "foo_test.py", "foo.test.ts",
             "foo.spec.js", "FooTest.java", "FooTests.java", "FooIT.java", "FooTest.kt", "FooTests.kt",
             "foo_spec.rb", "FooTest.cs", "FooTests.cs", "FooTest.php", "FooSpec.scala", "FooTest.scala",
             "FooTests.swift", "tests.py",
         )
         kept = ("latest.ts", "contest.py", "attestation.go", "Testimonial.java", "migration_utils.py",
-                "ab_test.py", "ab_test.ts", "split_test.py", "load_test.py", "stress_test.py", "smoke_test.py")
+                "ab_test.py", "ab_test.ts", "split_test.py", "load_test.py", "stress_test.py", "smoke_test.py",
+                "helper.cjs", "helper.mts", "helper.cts")
         for name in skipped + kept:
             self.assertEqual(drexify.is_test_name(name), name in skipped, name)
         for name in skipped + kept:

@@ -23,7 +23,7 @@ HEADLINE = re.compile((
 ).replace(" ", r"\s+"))
 CONTINUATION = re.compile(r"^\s+(?![-*+]\s|\d+[.)]\s|#|```|~~~)\S")
 SITE = re.compile(r"^\s*[-*]\s+(?P<name>.+?)\s+\(`(?P<ptr>[^`]+)`\):\s*(?P<rest>.*)$")
-CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
+CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
 POINTER_EXT = CODE_EXT | {".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql", ".sh", ".html", ".css", ".ini", ".cfg", ".txt",
                           ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".vue", ".svelte", ".ipynb"}
 POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<line>\d+)(?P<tail>(?:[-,:]\d+)*)`")
@@ -164,7 +164,7 @@ def git_state(repo):
 
 
 TEST_FILE = re.compile(
-    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs)|_spec\.rb|"
+    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs|mts|cts)|_spec\.rb|"
     r"(?:Test|Tests|IT)\.java|Tests?\.kt|Tests?\.cs|Test\.php|(?:Spec|Test)\.scala|Tests\.swift)$")
 _EXEMPT_TEST_STEMS = ("ab_test", "split_test", "load_test", "stress_test", "smoke_test")
 _TEST_DIR_NAMES = {name.lower() for name in TEST_DIRS}
