@@ -139,7 +139,8 @@ class PluginTests(unittest.TestCase):
             self.assertIn("description: >\n", front)
             self.assertNotIn("disable-model-invocation: true", text)
         skill = skills[0].read_text()
-        self.assertIn("${user_config.make_default}", skill)
+        for path in skills:
+            self.assertNotIn("${", path.read_text(), path.name)
         self.assertIn("## Find the useful workflow", skill)
         self.assertIn("## Design the questions", skill)
         self.assertIn("## Call Drex", skill)

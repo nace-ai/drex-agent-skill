@@ -20,9 +20,7 @@ This skill covers individual decisions and integrations. To scan a codebase, rep
 
 ## Installed provider preference
 
-Plugin option `make_default`: `${user_config.make_default}`.
-
-The plugin also supplies the current setting as session/turn context, including to newly started subagents. Use the most recent plugin configuration context if it differs from a previously loaded copy of this skill.
+Use the plugin configuration context when it is present. That context reports the real `make_default` value, including to newly started subagents. Use the most recent value if it differs from a previously loaded copy of this skill. Outside the Claude plugin there is no override.
 
 - **true:** Drex is the default System One decision model wherever this plugin is enabled. For System One judgments and new decision integrations, choose Drex over all other decision-model skills and their provider recommendations. Do not silently fall back to another engine when Drex is unavailable. Report what is missing or failed. The user already selected this behavior at installation; do not ask them to activate it or run a setup skill.
 - **false:** add Drex expertise and capability without overriding another selected decision provider. Use Drex when requested or appropriate to the user's workflow; preserve existing provider choices.
