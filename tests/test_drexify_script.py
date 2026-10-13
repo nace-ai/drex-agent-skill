@@ -793,12 +793,19 @@ class DrexifyScriptTests(unittest.TestCase):
             "db/migrations/001_init.js",
             "db/migrate/20240101000000_create_users.rb",
             "engines/blog/db/migrate/001_create.rb",
-            "src/main/resources/flyway/V1__init.java",
+            "src/main/resources/db/migration/V1__init.java",
+            "src/main/java/db/migration/V1__init.java",
+            "db/migration/V2__seed.java",
+            "Infrastructure/Migrations/001_Init.cs",
+            "src/migration/1710000000000-Init.ts",
+            "db/migration/extra/V3__more.java",
         )
         kept = (
             "app/migration_utils.py",
             "services/data_migration_service/run.py",
             "lib/migrate/helper.rb",
+            "lib/migrations_api/client.py",
+            "app/migration/run.py",
         )
         body = "def upgrade():\n    return client.chat.completions.create(model='m')\n"
         for rel in skipped + kept:

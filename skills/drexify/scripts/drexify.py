@@ -176,10 +176,20 @@ def under_source_test_root(dirs):
 
 
 def is_migration(parts):
+    """Skip Alembic, Flyway, EF, Rails, Prisma, and TypeORM migration trees.
+
+    `migrations` matches any case. A singular `migration` directory counts only under
+    `db` (Flyway) or `src` (TypeORM). `db/migrate` stays the Rails layout."""
     dirs = parts[:-1]
-    if any(part in MIGRATION_DIRS for part in dirs):
-        return True
-    return any(part == "migrate" and index and dirs[index - 1] == "db" for index, part in enumerate(dirs))
+    for index, part in enumerate(dirs):
+        if part.lower() in MIGRATION_DIRS:
+            return True
+        parent = dirs[index - 1] if index else ""
+        if part == "migrate" and parent == "db":
+            return True
+        if part == "migration" and parent in ("db", "src"):
+            return True
+    return False
 
 
 def scannable(rel, include_tests):
