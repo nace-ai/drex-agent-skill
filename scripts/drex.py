@@ -15,7 +15,8 @@ import urllib.request
 
 BASE_URL = "https://drex.nace.ai"
 REQUEST_LIMIT = 1048576
-MODEL_OVERHEAD_LIMIT = 1024
+# Raw input may be indented or ASCII-escaped. The hosted limit is enforced on the compact encoding.
+INPUT_LIMIT = 4 * REQUEST_LIMIT
 RESPONSE_LIMIT = 8 * 1048576
 
 
@@ -85,10 +86,9 @@ def encode_request(body):
         else:
             raise HelperError("Question type must be choice, noul, or score.")
     try:
-        encoded = json.dumps(body, allow_nan=False).encode("utf-8")
-        counted = json.dumps(
-            {"state": body["state"], "questions": body["questions"]}, allow_nan=False,
-        ).encode("utf-8")
+        compact = {"allow_nan": False, "ensure_ascii": False, "separators": (",", ":")}
+        encoded = json.dumps(body, **compact).encode("utf-8")
+        counted = json.dumps({"state": body["state"], "questions": body["questions"]}, **compact).encode("utf-8")
     except (ValueError, TypeError):
         raise HelperError("Request must contain valid, finite JSON values.") from None
     if len(counted) > REQUEST_LIMIT:
@@ -142,18 +142,13 @@ def model_lines(result, key):
         raise HelperError("Drex returned an unexpected model catalog.")
     lines = []
     for model in models:
-        if not isinstance(model, dict) or "alias_for" not in model:
+        name = model.get("name") if isinstance(model, dict) else None
+        if not isinstance(name, str) or not name.strip():
             raise HelperError("Drex returned an unexpected model catalog.")
-        name = model.get("name")
-        description = model.get("description")
-        released = model.get("release_date")
-        alias = model["alias_for"]
-        if (not isinstance(name, str) or not name.strip()
-                or not isinstance(description, str) or not isinstance(released, str)
-                or (alias is not None and (not isinstance(alias, str) or not alias.strip()))):
-            raise HelperError("Drex returned an unexpected model catalog.")
-        head = name if alias is None else name + " -> " + alias
-        line = (head + "  " + released + "  " + description).replace("\r", " ").replace("\n", " ")
+        alias = model.get("alias_for")
+        head = name + " -> " + alias if isinstance(alias, str) and alias.strip() else name
+        fields = [head] + [model[f] for f in ("release_date", "description") if isinstance(model.get(f), str)]
+        line = "  ".join(" ".join(field.split()) for field in fields)
         lines.append(line.replace(key, "[REDACTED]"))
     return lines
 
@@ -206,15 +201,14 @@ def validate_response(result, body):
 
 
 def load_body(filename):
-    read_limit = REQUEST_LIMIT + MODEL_OVERHEAD_LIMIT
     try:
         if filename == "-":
-            raw = sys.stdin.buffer.read(read_limit + 1)
+            raw = sys.stdin.buffer.read(INPUT_LIMIT + 1)
         else:
             with Path(filename).open("rb") as file:
-                raw = file.read(read_limit + 1)
-        if len(raw) > read_limit:
-            raise HelperError("Request file exceeds 1 MiB.")
+                raw = file.read(INPUT_LIMIT + 1)
+        if len(raw) > INPUT_LIMIT:
+            raise HelperError("Request input exceeds 4 MiB before encoding.")
         return json.loads(raw)
     except FileNotFoundError:
         raise HelperError("Request file was not found.") from None

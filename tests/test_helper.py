@@ -445,7 +445,7 @@ class RequestValidationTests(OfflineTestCase):
 
     def counted_bytes(self, body):
         payload = {"state": body["state"], "questions": body["questions"]}
-        return len(json.dumps(payload, allow_nan=False).encode("utf-8"))
+        return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
     def test_encoded_request_limit_counts_state_and_questions_only(self):
         body = valid_body()
@@ -454,7 +454,6 @@ class RequestValidationTests(OfflineTestCase):
         encoded = drex.encode_request(body)
         self.assertEqual(self.counted_bytes(body), drex.REQUEST_LIMIT)
         self.assertGreater(len(encoded), drex.REQUEST_LIMIT)
-        self.assertLessEqual(len(encoded) - drex.REQUEST_LIMIT, drex.MODEL_OVERHEAD_LIMIT)
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
         self.allow_response(valid_response())
         code, stdout, stderr = self.invoke(["judge"], body=body)
@@ -464,12 +463,24 @@ class RequestValidationTests(OfflineTestCase):
         self.network.reset_mock()
         self.network.side_effect = AssertionError("Unexpected HTTP attempt in offline test")
         self.assert_failure(self.invoke(["judge"], body=body))
-        # Raw UTF-8 can fit while ensure_ascii JSON escaping exceeds the limit.
-        body["state"] = "é" * (drex.REQUEST_LIMIT // 4)
-        raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        self.assertLess(len(raw), drex.REQUEST_LIMIT)
-        self.assert_failure(self.invoke(["judge"], raw=raw))
         self.network.assert_not_called()
+
+    def test_limit_counts_compact_utf8_not_escaped_or_indented_input(self):
+        # Drex measures compact UTF-8. The live API accepted a 1.27 MB escaped, 436 KB UTF-8 body.
+        body = valid_body()
+        body["state"] = "é😀" * (drex.REQUEST_LIMIT // 16)
+        self.assertGreater(len(json.dumps(body).encode("utf-8")), drex.REQUEST_LIMIT)
+        raw = json.dumps(body, indent=4).encode("utf-8")
+        self.assertGreater(len(raw), drex.REQUEST_LIMIT)
+        encoded = drex.encode_request(json.loads(raw))
+        self.assertLess(len(encoded), drex.REQUEST_LIMIT)
+        self.assertIn("é😀".encode("utf-8"), encoded)
+        self.assertNotIn(b"\\u", encoded)
+        self.assertNotIn(b": ", encoded)
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        self.allow_response(valid_response())
+        code, _, stderr = self.invoke(["judge"], raw=raw)
+        self.assertEqual((code, stderr), (0, ""))
 
     def test_invalid_json_and_invalid_utf8_stdin_do_not_leak_or_use_network(self):
         for raw in (b"", PRIVATE_INPUT.encode(), b'{"private":"' +
@@ -495,8 +506,8 @@ class RequestValidationTests(OfflineTestCase):
         self.assertEqual(drex.load_body(str(filename)), valid_body())
 
     def test_raw_input_limit_for_file_and_stdin(self):
-        read_limit = drex.REQUEST_LIMIT + drex.MODEL_OVERHEAD_LIMIT
-        exact = b"0" + b" " * (drex.REQUEST_LIMIT - 1)
+        read_limit = drex.INPUT_LIMIT
+        exact = b"0" + b" " * (drex.INPUT_LIMIT - 1)
         self.stdin.buffer = io.BytesIO(exact)
         self.assertEqual(drex.load_body("-"), 0)
         filename = self.folder / "large.json"
@@ -504,10 +515,10 @@ class RequestValidationTests(OfflineTestCase):
         self.assertEqual(drex.load_body(str(filename)), 0)
         for source in ("-", str(filename)):
             with self.subTest(source="stdin" if source == "-" else "file"):
-                oversized = exact + b" " * (drex.MODEL_OVERHEAD_LIMIT + 50)
+                oversized = exact + b" " * 50
                 filename.write_bytes(oversized)
                 self.stdin.buffer = io.BytesIO(oversized)
-                with self.assertRaisesRegex(drex.HelperError, "1 MiB"):
+                with self.assertRaisesRegex(drex.HelperError, "4 MiB"):
                     drex.load_body(source)
                 if source == "-":
                     self.assertEqual(self.stdin.buffer.tell(), read_limit + 1)
@@ -953,13 +964,15 @@ class ModelsCommandTests(OfflineTestCase):
         self.allow_response(bad)
         stderr = self.assert_failure(self.invoke(["models", "--no-input"]))
         self.assertIn("unexpected model catalog", stderr)
-        bad["models"] = [{
-            "name": "drex-v1.0",
-            "description": PRIVATE_SERVER + SYNTHETIC_KEY,
-            "release_date": "2026-09-24",
-        }]
-        self.allow_response(bad)
-        self.assert_failure(self.invoke(["models", "--no-input"]))
+        sparse = sample_catalog()
+        sparse["models"] = [
+            {"name": "drex-v1.0", "description": "Line one\nline two " + SYNTHETIC_KEY},
+            {"name": "drex-v9", "alias_for": None, "release_date": None, "description": 5},
+        ]
+        self.allow_response(sparse)
+        code, stdout, stderr = self.invoke(["models", "--no-input"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(stdout.splitlines(), ["drex-v1.0  Line one line two [REDACTED]", "drex-v9"])
         bad["models"] = [{
             "name": " ",
             "description": PRIVATE_INPUT,
