@@ -106,6 +106,7 @@ class PluginTests(unittest.TestCase):
         plugin, = market["plugins"]
         self.assertEqual(plugin["name"], manifest["name"])
         self.assertEqual(plugin["source"], "./")
+        self.assertEqual(manifest["version"], "0.6.0")
         self.assertEqual(manifest["repository"], "https://github.com/nace-ai/drex-agent-skills")
 
     def test_github_urls_use_plural_repo(self):
