@@ -2,6 +2,7 @@
 import importlib.util
 import io
 import json
+import re
 from contextlib import redirect_stdout
 from unittest import mock
 from pathlib import Path
@@ -39,6 +40,10 @@ class DrexifyScriptTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def report(self, body):
+        if not re.search(r"candidate\s+functions?", body, re.I):
+            if body and not body.endswith("\n"):
+                body += "\n"
+            body += "Coverage: checked the candidate functions listed above.\n"
         path = Path(self.tmp.name) / "report.md"
         path.write_text(body)
         return path
@@ -76,8 +81,9 @@ class DrexifyScriptTests(unittest.TestCase):
         body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
                 "- Contract matching (`.../app/match.py:3`): candidate.\n")
         path = self.report(body)
+        written = path.read_text()
         self.assertTrue(any("run with --fix" in p for p in drexify.check(path, self.repo)["problems"]))
-        self.assertEqual(path.read_text(), body)
+        self.assertEqual(path.read_text(), written)
         result = drexify.check(path, self.repo, fix=True)
         self.assertEqual(result["problems"], [])
         self.assertIn("`services/billing/app/match.py:3`", path.read_text())
@@ -86,9 +92,10 @@ class DrexifyScriptTests(unittest.TestCase):
         body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
                 "- Doc classify (`classify.py:4`): candidate.\n")
         path = self.report(body)
+        written = path.read_text()
         result = drexify.check(path, self.repo, fix=True)
         self.assertTrue(any("ambiguous, matches 2 files" in p for p in result["problems"]))
-        self.assertEqual(path.read_text(), body)
+        self.assertEqual(path.read_text(), written)
 
     def test_check_rejects_site_pointers_without_a_line(self):
         path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
@@ -889,6 +896,42 @@ class DrexifyScriptTests(unittest.TestCase):
         got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(nested), nested.splitlines())]
         self.assertEqual(got, ["createToolCallAccuracyScorerLLM"])
         self.assertEqual(spans[0][1], len(nested.splitlines()))
+
+    def test_coverage_line_is_checked_after_the_site_list(self):
+        site = "- Route (`services/search/app/route.py:1`): candidate.\n"
+        head = "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+        bare = self.report(head + site)
+        bare.write_text(head + site)
+        self.assertTrue(any("no coverage line" in p for p in drexify.check(bare, self.repo)["problems"]))
+        good = (
+            "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. Opened 0 of 0 files without one and looked around the candidates: "
+            "0 more sites. 1 site line in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + good), self.repo)["problems"], [])
+        singular = (
+            "Checked 1 of 1 candidate function: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. Opened 1 of 1 file without one and looked around the candidates: "
+            "0 more sites. 1 site line in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + singular), self.repo)["problems"], [])
+        wrapped = (
+            "Checked 1,212 of 1,212 candidate functions: 48 sites, 61 callers, wrappers, or backends,\n"
+            "1,099 not decisions, 4 dead. Opened 95 of 95 files without one and looked around the\n"
+            "candidates: 6 more sites. 54 site lines in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + wrapped), self.repo)["problems"], [])
+        bad_sum = good.replace("0 not decisions", "1 not decisions")
+        self.assertTrue(any("buckets sum" in p for p in drexify.check(self.report(head + site + bad_sum), self.repo)["problems"]))
+        short = good.replace("Checked 1 of 1", "Checked 1 of 4")
+        result = drexify.check(self.report(head + site + short), self.repo)
+        self.assertEqual(result["problems"], [])
+        self.assertTrue(any("checked 1 of 4" in w for w in result["warnings"]))
+        bad_total = good.replace("1 site line in total", "3 site lines in total")
+        self.assertTrue(any("site lines in total" in p for p in drexify.check(self.report(head + site + bad_total), self.repo)["problems"]))
+        early = self.report(good + head + site)
+        early.write_text(good + head + site)
+        self.assertTrue(any("no coverage line" in p for p in drexify.check(early, self.repo)["problems"]))
 
 
 if __name__ == "__main__":

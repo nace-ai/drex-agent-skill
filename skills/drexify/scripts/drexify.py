@@ -994,6 +994,19 @@ def resolve(raw, line, files, by_suffix, count):
 UNCOUNTED = re.compile(r"^(?:not counted|plan|implementation plan)\b")
 FENCE = re.compile(r"^\s*(```|~~~)")
 PIN = re.compile(r"^(?P<path>.+?):(?P<line>\d+)")
+COVERAGE_MENTION = re.compile(r"candidate\s+functions?", re.I)
+COUNT = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
+COVERAGE_FULL = re.compile(
+    r"Checked\s+(?P<checked>" + COUNT + r")\s+of\s+(?P<total>" + COUNT + r")\s+candidate\s+functions?\s*:\s*"
+    r"(?P<sites>" + COUNT + r")\s+sites?\s*,\s*"
+    r"(?P<callers>" + COUNT + r")\s+callers,\s*wrappers,\s*or\s+backends\s*,\s*"
+    r"(?P<other>" + COUNT + r")\s+not\s+decisions?\s*,\s*"
+    r"(?P<dead>" + COUNT + r")\s+dead\b"
+    r".{0,800}?"
+    r"(?P<more>" + COUNT + r")\s+more\s+sites?\b"
+    r".{0,800}?"
+    r"(?P<lines>" + COUNT + r")\s+site\s+lines?\s+in\s+total",
+    re.I | re.S)
 
 
 def heading_level(heading):
@@ -1046,6 +1059,34 @@ def site_start(repo, rel, line, cache):
     return line, None
 
 
+def coverage_review(lines, last_site, fenced_lines):
+    """Problems and warnings for the coverage line after the counted site list."""
+    start = 0 if last_site is None else last_site + 1
+    text = "\n".join(lines[i] for i in range(start, len(lines)) if i not in fenced_lines)
+    problems, warnings = [], []
+    if not COVERAGE_MENTION.search(text):
+        problems.append("no coverage line after the site list. Say how many candidate functions were checked")
+        return problems, warnings
+
+    def number(value):
+        return int(value.replace(",", ""))
+
+    for match in COVERAGE_FULL.finditer(text):
+        checked, total = number(match.group("checked")), number(match.group("total"))
+        sites, callers = number(match.group("sites")), number(match.group("callers"))
+        other, dead = number(match.group("other")), number(match.group("dead"))
+        more, site_lines = number(match.group("more")), number(match.group("lines"))
+        buckets = sites + callers + other + dead
+        if buckets != checked:
+            problems.append(f"coverage buckets sum to {buckets}, not the {checked} candidate functions checked")
+        if checked < total:
+            warnings.append(f"coverage checked {checked} of {total} candidate functions")
+        expected = sites + more
+        if site_lines != expected:
+            problems.append(f"coverage says {site_lines} site lines in total, expected {expected}")
+    return problems, warnings
+
+
 def check(report_path, repo, fix=False):
     repo = Path(repo)
     from_stdin = str(report_path) == "-"
@@ -1073,8 +1114,9 @@ def check(report_path, repo, fix=False):
 
     lines = POINTER.sub(repl, text).split("\n")
     tally = {s: 0 for s in STATUSES}
-    seen, spans_cache = {}, {}
+    seen, spans_cache, fenced_lines = {}, {}, set()
     sites = 0
+    last_site = None
     uncounted_level = None
     fenced = False
     found_headline = HEADLINE.search("\n".join(lines))
@@ -1085,6 +1127,7 @@ def check(report_path, repo, fix=False):
             fenced = not fenced
             continue
         if fenced:
+            fenced_lines.add(index)
             continue
         heading = HEADING.match(line)
         if heading and index < headline_at:
@@ -1108,6 +1151,7 @@ def check(report_path, repo, fix=False):
             problems.append(f"line {number}: status must start with one of: {', '.join(STATUSES)}")
             continue
         sites += 1
+        last_site = block[-1]
         tally[status] += 1
         ptr = site.group("ptr")
         if not SITE_POINTER.match(ptr):
@@ -1153,7 +1197,10 @@ def check(report_path, repo, fix=False):
         for status in STATUSES:
             if claimed[status] != tally[status]:
                 problems.append(f"headline says {claimed[status]} {status}, the list has {tally[status]}")
-    return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if writable else [], "problems": problems}
+    extra, warnings = coverage_review(lines, last_site, fenced_lines)
+    problems.extend(extra)
+    return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if writable else [],
+            "warnings": warnings, "problems": problems}
 
 
 def main(argv=None):
@@ -1199,6 +1246,8 @@ def main(argv=None):
         print(f"{result['sites']} sites ({counts})")
         for f in result["pointers_fixed"]:
             print(f"fixed: {f}")
+        for w in result["warnings"]:
+            print(f"warning: {w}")
         for p in result["problems"]:
             print(f"problem: {p}")
         print("ok" if not result["problems"] else f"{len(result['problems'])} problems")
