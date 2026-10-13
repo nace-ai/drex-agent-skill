@@ -7,7 +7,7 @@
     "url": "https://www.nace.ai"
   },
   "homepage": "https://drex.nace.ai/docs",
-  "repository": "https://github.com/nace-ai/drex-agent-skill",
+  "repository": "https://github.com/nace-ai/drex-agent-skills",
   "license": "MIT",
   "userConfig": {
     "make_default": {

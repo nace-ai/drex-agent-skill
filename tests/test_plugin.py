@@ -106,6 +106,20 @@ class PluginTests(unittest.TestCase):
         plugin, = market["plugins"]
         self.assertEqual(plugin["name"], manifest["name"])
         self.assertEqual(plugin["source"], "./")
+        self.assertEqual(manifest["repository"], "https://github.com/nace-ai/drex-agent-skills")
+
+    def test_github_urls_use_plural_repo(self):
+        readme = (ROOT / "README.md").read_text()
+        plugin = (ROOT / ".claude-plugin/plugin.json").read_text()
+        for label, text in (("readme", readme), ("plugin.json", plugin)):
+            urls = re.findall(r"https://github\.com/[^\s)\"']+", text)
+            self.assertGreater(len(urls), 0, label)
+            skill_urls = [url for url in urls if "drex-agent-skill" in url]
+            self.assertGreater(len(skill_urls), 0, label)
+            for url in skill_urls:
+                self.assertIn("github.com/nace-ai/drex-agent-skills", url, f"{label}: {url}")
+            bare = text.replace("nace-ai/drex-agent-skills", "")
+            self.assertNotIn("nace-ai/drex-agent-skill", bare, label)
 
     def test_hook_context_names_both_skills(self):
         for value in ("true", "false", "bogus"):
@@ -151,9 +165,9 @@ class PluginTests(unittest.TestCase):
         self.assertIsNone(re.search(r"skills/drex(?![-\w])", readme))  # no old single-skill path
         self.assertIn("drex.nace.ai/login", readme)
         self.assertIn("export DREX_API_KEY='paste-your-key-here'", readme)
-        self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skill", readme)
+        self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skills", readme)
         self.assertIn("claude plugin install drex@nace-ai --config make_default=true", readme)
-        clone = 'git clone --depth 1 https://github.com/nace-ai/drex-agent-skill.git "$HOME/drex-agent-skill"'
+        clone = 'git clone --depth 1 https://github.com/nace-ai/drex-agent-skills.git "$HOME/drex-agent-skills"'
         local_agents = ("OpenCode", "Cursor", "GitHub Copilot", "Windsurf", "Cline", "OpenClaw", "DeepSeek Harness", "Other harness")
         native_agents = ("Claude Code", "Hermes Agent", "Codex", "Gemini CLI", "Pi")
         for agent in (*local_agents, *native_agents):
@@ -163,30 +177,30 @@ class PluginTests(unittest.TestCase):
             else:
                 self.assertNotIn(clone, section, agent)
             self.assertRegex(section, r"Restart .+ after installation to load Drex", agent)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex-for-harness" ~/.config/opencode/skills/drex-for-harness', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drexify" ~/.config/opencode/skills/drexify', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drex-for-harness" ~/.config/opencode/skills/drex-for-harness', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drexify" ~/.config/opencode/skills/drexify', readme)
         self.assertIn("~/.config/opencode/AGENTS.md", readme)
-        self.assertIn("hermes skills install nace-ai/drex-agent-skill/skills/drex-for-harness\n", readme)
-        self.assertIn("hermes skills install nace-ai/drex-agent-skill/skills/drexify\n", readme)
+        self.assertIn("hermes skills install nace-ai/drex-agent-skills/skills/drex-for-harness\n", readme)
+        self.assertIn("hermes skills install nace-ai/drex-agent-skills/skills/drexify\n", readme)
         self.assertIn("env_passthrough:\n    - DREX_API_KEY", readme)
-        self.assertIn("https://github.com/nace-ai/drex-agent-skill/tree/main/skills/drex-for-harness", readme)
-        self.assertIn("https://github.com/nace-ai/drex-agent-skill/tree/main/skills/drexify", readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex-for-harness" ~/.cursor/skills/drex-for-harness', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drexify" ~/.cursor/skills/drexify', readme)
-        self.assertIn("gemini skills install https://github.com/nace-ai/drex-agent-skill.git --path skills/drex-for-harness\n", readme)
-        self.assertIn("gemini skills install https://github.com/nace-ai/drex-agent-skill.git --path skills/drexify\n", readme)
-        self.assertIn('copilot skill add "$HOME/drex-agent-skill/skills/drex-for-harness"', readme)
-        self.assertIn('copilot skill add "$HOME/drex-agent-skill/skills/drexify"', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex-for-harness" ~/.codeium/windsurf/skills/drex-for-harness', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drexify" ~/.codeium/windsurf/skills/drexify', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex-for-harness" ~/.cline/skills/drex-for-harness', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drexify" ~/.cline/skills/drexify', readme)
-        self.assertIn('openclaw skills install "$HOME/drex-agent-skill/skills/drex-for-harness" --global', readme)
-        self.assertIn('openclaw skills install "$HOME/drex-agent-skill/skills/drexify" --global', readme)
-        self.assertIn("pi install git:github.com/nace-ai/drex-agent-skill", readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drex-for-harness" "${DSH_HOME:-$HOME/.dsh}/skills/drex-for-harness"', readme)
-        self.assertIn('ln -s "$HOME/drex-agent-skill/skills/drexify" "${DSH_HOME:-$HOME/.dsh}/skills/drexify"', readme)
-        self.assertNotIn('cp "$HOME/drex-agent-skill', readme)
+        self.assertIn("https://github.com/nace-ai/drex-agent-skills/tree/main/skills/drex-for-harness", readme)
+        self.assertIn("https://github.com/nace-ai/drex-agent-skills/tree/main/skills/drexify", readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drex-for-harness" ~/.cursor/skills/drex-for-harness', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drexify" ~/.cursor/skills/drexify', readme)
+        self.assertIn("gemini skills install https://github.com/nace-ai/drex-agent-skills.git --path skills/drex-for-harness\n", readme)
+        self.assertIn("gemini skills install https://github.com/nace-ai/drex-agent-skills.git --path skills/drexify\n", readme)
+        self.assertIn('copilot skill add "$HOME/drex-agent-skills/skills/drex-for-harness"', readme)
+        self.assertIn('copilot skill add "$HOME/drex-agent-skills/skills/drexify"', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drex-for-harness" ~/.codeium/windsurf/skills/drex-for-harness', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drexify" ~/.codeium/windsurf/skills/drexify', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drex-for-harness" ~/.cline/skills/drex-for-harness', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drexify" ~/.cline/skills/drexify', readme)
+        self.assertIn('openclaw skills install "$HOME/drex-agent-skills/skills/drex-for-harness" --global', readme)
+        self.assertIn('openclaw skills install "$HOME/drex-agent-skills/skills/drexify" --global', readme)
+        self.assertIn("pi install git:github.com/nace-ai/drex-agent-skills", readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drex-for-harness" "${DSH_HOME:-$HOME/.dsh}/skills/drex-for-harness"', readme)
+        self.assertIn('ln -s "$HOME/drex-agent-skills/skills/drexify" "${DSH_HOME:-$HOME/.dsh}/skills/drexify"', readme)
+        self.assertNotIn('cp "$HOME/drex-agent-skills', readme)
         self.assertNotIn("## Roo Code", readme)
         self.assertNotIn("npx skills add", readme)
         self.assertIn("## Install Drex for your agent\n", readme)
