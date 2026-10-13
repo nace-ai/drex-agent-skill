@@ -543,7 +543,10 @@ class RequestValidationTests(OfflineTestCase):
 class TransportAndCheckTests(OfflineTestCase):
     def test_check_uses_only_fixed_get_models_and_does_not_echo_catalog(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        os.environ["HTTP_PROXY"] = "http://example.invalid:8080"
         os.environ["HTTPS_PROXY"] = "https://example.invalid/proxy"
+        os.environ["ALL_PROXY"] = "socks5://example.invalid"
+        os.environ["NO_PROXY"] = "*"
         opener, response = self.allow_response({"models": [PRIVATE_SERVER, SYNTHETIC_KEY]})
         code, stdout, stderr = self.invoke(["check"])
         self.assertEqual((code, stderr), (0, ""))
@@ -694,6 +697,34 @@ class JudgeAndResponseTests(OfflineTestCase):
         self.prompt.assert_not_called()
         self.child.assert_not_called()
         self.assertEqual(list(self.folder.iterdir()), [])
+
+    def test_unknown_response_fields_are_accepted(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        result = valid_response()
+        result["region"] = "synthetic-region"
+        result["answers"]["quality"]["note"] = "synthetic-note"
+        self.allow_response(result)
+        code, stdout, stderr = self.invoke(["judge"], body=valid_body())
+        self.assertEqual((code, stderr), (0, ""))
+        parsed = json.loads(stdout)
+        self.assertEqual(parsed["region"], "synthetic-region")
+        self.assertEqual(parsed["answers"]["quality"]["note"], "synthetic-note")
+
+    def test_score_legend_that_differs_from_criteria_is_rejected(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        result = valid_response()
+        result["answers"]["quality"]["legend"] = [PRIVATE_SERVER, "medium", "high"]
+        self.allow_response(result)
+        stderr = self.assert_failure(self.invoke(["judge"], body=valid_body()))
+        self.assertIn("no decision should be consumed", stderr)
+
+    def test_server_nan_is_rejected_without_traceback(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        result = valid_response()
+        result["answers"]["quality"]["score"] = float("nan")
+        self.allow_response(result)
+        stderr = self.assert_failure(self.invoke(["judge"], body=valid_body()))
+        self.assertNotIn("nan", stderr.lower())
 
     def test_successful_response_exact_key_echo_is_redacted_everywhere(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
