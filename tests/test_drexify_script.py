@@ -1169,6 +1169,23 @@ class DrexifyScriptTests(unittest.TestCase):
         ]
         self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
 
+    def test_resolve_keeps_a_leading_dot_directory(self):
+        rel = ".github/workflows/x.py"
+        path = self.repo / rel
+        path.parent.mkdir(parents=True)
+        path.write_text("def classify_doc(t):\n    return 1\n")
+        coverage = (
+            "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. 0 more sites. 1 site line in total.\n"
+        )
+        head = "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+        self.assertEqual(drexify.check(self.report(head + f"- Hook (`{rel}:1`): candidate.\n" + coverage), self.repo)["problems"], [])
+        for raw in (f"./{rel}", f".../{rel}"):
+            report = self.report(head + f"- Hook (`{raw}:1`): candidate.\n" + coverage)
+            result = drexify.check(report, self.repo, fix=True)
+            self.assertEqual(result["problems"], [], (raw, result["problems"]))
+            self.assertIn(f"`{rel}:1`", report.read_text(), raw)
+
     def test_line_numbers_follow_newlines_only(self):
         text = 'note = "a\fb\u2028c"\n\ndef classify_doc(t):\n    return client.chat.completions.create(model="m")\n'
         path = self.repo / "feed.py"

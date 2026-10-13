@@ -1120,6 +1120,13 @@ def line_counts(repo, files, cache):
     return count
 
 
+def strip_dot_slash(text):
+    """Remove a leading ./ prefix, repeatedly. Do not strip other dots or slashes."""
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def bounded_line(line, total, rel):
     if total is None:
         return None, f"cannot read {rel}"
@@ -1134,7 +1141,7 @@ def resolve(raw, line, files, by_suffix, count):
         return bounded_line(line, count(raw), raw)
     if "{" in raw or "}" in raw:
         return None, "brace groups cannot be checked, write each path in full"
-    tail = raw.split(".../")[-1].split("…/")[-1].lstrip("./")
+    tail = strip_dot_slash(raw.split(".../")[-1].split("…/")[-1])
     matches = sorted(f for f in by_suffix.get(Path(tail).name, ()) if f == tail or f.endswith("/" + tail))
     if not matches:
         return None, "no such file"
