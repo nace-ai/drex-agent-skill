@@ -140,6 +140,54 @@ class DrexifyScriptTests(unittest.TestCase):
         files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/search/app/pick.py"]["functions"]], ["pick_template"])
 
+    def test_scan_learns_a_two_layer_wrapper_chain_without_a_model_import(self):
+        (self.repo / "shared/core/llm.py").write_text(
+            "import openai\n\ndef post_to_model(prompt):\n"
+            "    return client.chat.completions.create(model='m')\n")
+        (self.repo / "services/search/app/client.py").write_text(
+            "def forward_to_model(prompt):\n    return post_to_model(prompt)\n\n"
+            "def ask_model_client(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def relay_model_call(prompt):\n    return ask_model_client(prompt)\n\n"
+            "def should_ask_model(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def send_to_model(prompt):\n    return forward_to_model(prompt)\n\n"
+            "def summarize_thread(prompt):\n    return forward_to_model(prompt)\n")
+        (self.repo / "services/chat/app").mkdir(parents=True)
+        (self.repo / "services/chat/app/send.py").write_text(
+            "def send_to_model(prompt):\n    return forward_to_model(prompt)\n")
+        (self.repo / "services/search/app/grade.py").write_text(
+            "def grade_answer(text):\n    return ask_model_client(text)\n\n"
+            "def is_relevant(text):\n    return forward_to_model(text)\n")
+        result = drexify.scan(self.repo)
+        self.assertIn("forward_to_model", result["wrappers"])
+        self.assertIn("ask_model_client", result["wrappers"])
+        for name in ("grade_answer", "is_relevant", "summarize_thread", "should_ask_model", "send_to_model",
+                     "relay_model_call"):
+            self.assertNotIn(name, result["wrappers"])
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["services/search/app/grade.py"]["functions"]],
+                         ["grade_answer", "is_relevant"])
+
+    def test_eval_folders_are_scanned_when_plain_tests_are_not(self):
+        eval_file = self.repo / "tests/evals/judge.py"
+        eval_file.parent.mkdir(parents=True)
+        eval_file.write_text(
+            "def grade_reply(text):\n    return client.chat.completions.create(model='m')\n")
+        skipped = ("tests/plain_check.py", "tests/evals/test_judge.py", "examples/chat/grade.py",
+                   "samples/grade.py", "examples/evals/grade.py", "tests/evals/fixtures/fake.py",
+                   "evals/tests/helpers.py", "testing/llmtest/check.go")
+        for rel in skipped + ("evals/judge.py",):
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_text(
+                "def grade_reply(text):\n    return client.chat.completions.create(model='m')\n")
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn("tests/evals/judge.py", paths)
+        self.assertIn("evals/judge.py", paths)
+        for rel in skipped:
+            self.assertNotIn(rel, paths)
+        self.assertNotIn("services/billing/tests/test_match.py", paths)
+        self.assertIn("services/billing/tests/test_match.py",
+                      {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]})
+
     def test_scan_follows_same_file_helpers_for_decision_named_functions(self):
         (self.repo / "services/billing/app/gl.py").write_text(
             "from rapidfuzz import fuzz\n\ndef _score(a, b):\n    return fuzz.ratio(a, b)\n\n"
@@ -176,6 +224,15 @@ class DrexifyScriptTests(unittest.TestCase):
         files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
         self.assertEqual([fn["name"] for fn in files["services/search/app/detect.go"]["functions"]],
                          ["detectRepetition", "matchLabel"])
+
+    def test_go_generate_content_is_a_model_call(self):
+        for line in ("resp, err := llm.GenerateContent(ctx, messages)",
+                     "text, err := llms.GenerateFromSinglePrompt(ctx, llm, prompt)",
+                     'url := fmt.Sprintf("%s/models/%s:generateContent", root, model)'):
+            self.assertIn("model-call", drexify.line_hits(line)[0][1], line)
+        for line in ("type GenerateContentResponse struct {}",
+                     "func (m *Model) GenerateContent(ctx context.Context, mc []Message) error {"):
+            self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
 
     def test_framework_llm_objects_are_model_calls(self):
         for line in ("response = self.llm.call(prompt)", "out = await llm_instance.ainvoke(messages)",
@@ -297,6 +354,91 @@ class DrexifyScriptTests(unittest.TestCase):
                 "  completion(\n    body: Body,\n  ) {\n    return 1;\n  }\n\n"
                 "  run() {\n    doThing(\n      a,\n    );\n    if (\n      x\n    ) {\n      y();\n    }\n  }\n}\n")
         self.assertEqual([n for _, n in drexify.generic_starts(text.splitlines())], ["chatStream", "completion", "run"])
+
+    def test_phrase_loop_is_a_text_rule(self):
+        text = (
+            "def _should_replan(self):\n"
+            "    content = str(last.get('content', '')).lower()\n"
+            "    indicators = ['need to reconsider', 'replan']\n"
+            "    for indicator in indicators:\n"
+            "        if indicator in content:\n"
+            "            return True\n"
+            "    return False\n\n"
+            "def has_key(key):\n"
+            "    return key in some_dict\n\n"
+            "def walk(rows):\n"
+            "    for key in rows:\n"
+            "        if other in key:\n"
+            "            return key\n\n"
+            "def is_known(rows, seen):\n"
+            "    for key in rows:\n"
+            "        if key in seen:\n"
+            "            return True\n"
+            "    return False\n"
+        )
+        hits = {line.strip(): kinds for line, kinds in (
+            (text.splitlines()[n - 1], ks) for n, ks in drexify.line_hits(text))}
+        self.assertIn("text-rule", hits["if indicator in content:"])
+        self.assertNotIn("text-rule", hits.get("return key in some_dict", []))
+        self.assertNotIn("text-rule", hits.get("if other in key:", []))
+        self.assertNotIn("text-rule", hits.get("if key in seen:", []))
+        spans, _ = drexify.file_spans("f.py", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["_should_replan"])
+
+    def test_inline_label_tuple_makes_a_can_predicate_a_candidate(self):
+        text = (
+            "def can_answer_from_history(self, context):\n"
+            "    outcome = self._collapse_to_outcome(\n"
+            "        feedback,\n"
+            "        ('answer_from_history', 'route_to_flow'),\n"
+            "        llm,\n"
+            "    )\n"
+            "    return outcome == 'answer_from_history'\n\n"
+            "def can_store(self):\n"
+            "    labels = ('answer_from_history', 'route_to_flow')\n"
+            "    return labels\n\n"
+            "def save_pair(self):\n"
+            "    self.write(('answer_from_history', 'route_to_flow'))\n\n"
+            "def upgrade():\n"
+            "    op.execute(\"status IN ('pending', 'draft')\")\n\n"
+            "def verify_token(token):\n"
+            "    jwt.decode(token, options={'require': ['sub', 'email', 'iat']})\n"
+        )
+        spans, _ = drexify.file_spans("f.py", text)
+        found = drexify.line_hits(text)
+        got = {fn["name"]: fn["kinds"] for fn in drexify.candidate_functions(spans, found, text.splitlines())}
+        self.assertEqual(list(got), ["can_answer_from_history"])
+        self.assertIn("label-set", got["can_answer_from_history"])
+        self.assertNotIn("label-set", {k for _, ks in found for k in ks})
+        self.assertTrue(any("label-arg" in ks for _, ks in found))
+
+    def test_task_output_promotes_the_same_file_caller(self):
+        text = (
+            "def _evaluation_task(agent, task):\n"
+            "    return Task(\n"
+            "        description=task.description,\n"
+            "        agent=agent,\n"
+            "        output_pydantic=TaskEvaluationPydanticOutput,\n"
+            "    )\n\n"
+            "def evaluate(self, task_output):\n"
+            "    evaluation_task = self._evaluation_task(agent, task_output)\n"
+            "    return evaluation_task.execute_sync()\n\n"
+            "def kickoff(self, tasks):\n"
+            "    return self.crew.kickoff(tasks)\n"
+        )
+        kinds = drexify.line_hits("output_pydantic=TaskEvaluationPydanticOutput")[0][1]
+        self.assertIn("task-output", kinds)
+        self.assertNotIn("model-call", kinds)
+        self.assertFalse(drexify.line_hits("task.output_pydantic = None"))
+        self.assertFalse(drexify.line_hits("output_json = answer.model_dump_json()"))
+        self.assertFalse(drexify.line_hits("evaluation_task.execute_sync()"))
+        agent = {k for _, ks in drexify.line_hits("return Agent(model, output_type=Label)") for k in ks}
+        self.assertNotIn("task-output", agent)
+        self.assertNotIn("model-call", agent)
+        spans, _ = drexify.file_spans("f.py", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["_evaluation_task", "evaluate"])
 
     def test_predicates_with_keyword_rules_are_candidates(self):
         text = ("const PHRASES = ['sure', 'here is'];\n\nfunction isEnglishLine(line: string): boolean {\n"
@@ -428,6 +570,190 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual(sum(tally.values()), 5)
         self.assertEqual(on + part + done + cand, total)
         self.assertEqual(set(k for k, v in tally.items() if v), set(drexify.STATUSES))
+
+    def test_judge_block_with_a_model_is_a_model_call(self):
+        text = (
+            "export function createBiasScorer({ model }) {\n"
+            "  return createScorer({\n"
+            "    judge: {\n"
+            "      model,\n"
+            "      instructions: 'grade bias',\n"
+            "    },\n"
+            "  });\n"
+            "}\n\n"
+            "export function setModel(model: string) {\n"
+            "  return { model: model };\n"
+            "}\n\n"
+            "export function createPlainScorer() {\n"
+            "  return createScorer({ judge: { instructions: 'no model here' } });\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("bias.ts", text)
+        found = drexify.line_hits(text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, found, text.splitlines())]
+        self.assertEqual(got, ["createBiasScorer"])
+        self.assertIn("model-call", next(ks for n, ks in found if "judge:" in text.splitlines()[n - 1]))
+        self.assertFalse(any("model-call" in ks for n, ks in found if "instructions: 'no model here'" in text.splitlines()[n - 1]))
+
+    def test_structured_output_beside_generate_is_a_model_call(self):
+        text = (
+            "async function moderateContent(prompt: string) {\n"
+            "  const response = await this.moderationAgent.generate(prompt, {\n"
+            "    structuredOutput: { schema },\n"
+            "  });\n"
+            "  return response.object;\n"
+            "}\n\n"
+            "async function createNetworkLoop() {\n"
+            "  const options = {\n"
+            "    structuredOutput: { schema },\n"
+            "  };\n"
+            "  return tryGenerateWithJsonFallback(routingAgent, prompt, options);\n"
+            "}\n\n"
+            "export async function runDefaultCompletionCheck(\n"
+            "  streamContext?: {\n"
+            "    writer?: { write: (chunk: string) => void };\n"
+            "  },\n"
+            "): Promise<void> {\n"
+            "  return agent.stream(prompt, {\n"
+            "    structuredOutput: { schema },\n"
+            "  });\n"
+            "}\n\n"
+            "function describeSchema() {\n"
+            "  return { structuredOutput: { schema } };\n"
+            "}\n\n"
+            "async function send(prompt: string) {\n"
+            "  return agent.generate(prompt);\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("moderation.ts", text)
+        found = drexify.line_hits(text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, found, text.splitlines())]
+        self.assertEqual(got, ["moderateContent", "createNetworkLoop", "runDefaultCompletionCheck"])
+        self.assertFalse(any("model-call" in ks for _n, ks in drexify.line_hits("return agent.generate(prompt);\n")))
+
+    def test_classifier_decide_and_sentiment_library_are_model_calls(self):
+        text = (
+            "async function processInput(text: string) {\n"
+            "  return classifier.decide({ state: { request: text } });\n"
+            "}\n\n"
+            "function createToneScorer() {\n"
+            "  const sentiment = new Sentiment();\n"
+            "  return sentiment.analyze(text);\n"
+            "}\n\n"
+            "function note() {\n"
+            "  return classifier.score(text);\n"
+            "}\n\n"
+            "function pickTopic(text: string) {\n"
+            "  return this.topicClassifier.classify(text);\n"
+            "}\n\n"
+            "function label() {\n"
+            "  const sentiment = 'positive';\n"
+            "  return sentiment;\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("processors.ts", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["processInput", "createToneScorer", "pickTopic"])
+        self.assertFalse(drexify.line_hits("return classifier.score(text);\n"))
+        self.assertFalse(drexify.line_hits("const sentiment = 'positive';\n"))
+
+    def test_regex_some_test_makes_an_intent_predicate_a_candidate(self):
+        text = (
+            "export function isFutureIntentObservation(line: string): boolean {\n"
+            "  return futureIntentPatterns.some(pattern => pattern.test(line));\n"
+            "}\n\n"
+            "export function isFutureIntentNote(line: string): boolean {\n"
+            "  return futureIntentPatterns.some(pattern => pattern.exec(line));\n"
+            "}\n\n"
+            "export function collect(line: string) {\n"
+            "  return patterns.some(pattern => pattern.test(line));\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("date-utils.ts", text)
+        found = drexify.line_hits(text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, found, text.splitlines())]
+        self.assertEqual(got, ["isFutureIntentObservation"])
+        self.assertIn("text-rule", next(ks for n, ks in found if ".test(" in text.splitlines()[n - 1]))
+        self.assertFalse(any("text-rule" in ks and ".exec(" in text.splitlines()[n - 1] for n, ks in found))
+
+    def test_chat_client_prompt_call_is_a_model_call(self):
+        text = (
+            "public EvaluationResponse evaluate(EvaluationRequest request) {\n"
+            "  String evaluationResponse = this.chatClientBuilder.build()\n"
+            "    .prompt()\n"
+            "    .user(userMessage)\n"
+            "    .call()\n"
+            "    .content();\n"
+            "  return evaluationResponse;\n"
+            "}\n\n"
+            "public String rewrite(String query) {\n"
+            "  return this.chatClient.prompt().user(query).call().content();\n"
+            "}\n\n"
+            "public void prepare() {\n"
+            "  this.chatClientBuilder.build().prompt();\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("RelevancyEvaluator.java", text)
+        found = drexify.line_hits(text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, found, text.splitlines())]
+        self.assertEqual(got, ["evaluate"])
+        self.assertTrue(drexify.keep_file(found))
+        self.assertFalse(any("model-call" in ks for _n, ks in drexify.line_hits(
+            "return this.chatClient.prompt().user(query).call().content();\n")))
+
+    def test_java_any_match_contains_is_a_word_guard(self):
+        text = (
+            "private boolean containsSensitiveWord(ChatClientRequest request) {\n"
+            "  return this.sensitiveWords.stream()\n"
+            "    .anyMatch(w -> request.prompt()\n"
+            "      .getContents()\n"
+            "      .toLowerCase(Locale.ROOT)\n"
+            "      .contains(w.toLowerCase(Locale.ROOT)));\n"
+            "}\n\n"
+            "private boolean blocked(String text) {\n"
+            "  return BANNED.stream().anyMatch(w -> text.toLowerCase().contains(w));\n"
+            "}\n\n"
+            "private boolean containsToken(String text, List<String> tokens) {\n"
+            "  return tokens.stream().anyMatch(w -> text.equals(w));\n"
+            "}\n\n"
+            "private boolean hasWord(String text, String word) {\n"
+            "  return text.contains(word);\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("SafeGuardAdvisor.java", text)
+        found = drexify.line_hits(text)
+        got = {fn["name"]: fn["kinds"] for fn in drexify.candidate_functions(spans, found, text.splitlines())}
+        self.assertEqual(list(got), ["containsSensitiveWord", "blocked"])
+        self.assertIn("text-rule", got["containsSensitiveWord"])
+        self.assertTrue(drexify.keep_file(found))
+        self.assertFalse(any("word-guard" in ks or "text-rule" in ks for n, ks in found
+                             if "equals" in text.splitlines()[n - 1] or text.splitlines()[n - 1].strip() == "return text.contains(word);"))
+
+    def test_evaluator_run_inherits_a_model_signal_from_its_class(self):
+        text = (
+            "class FaithfulnessEvaluator:\n"
+            "    def __init__(self, chat_generator=None):\n"
+            "        self.kwargs = {'response_format': {'type': 'json_object'}}\n"
+            "\n"
+            "    def run(self, **inputs):\n"
+            "        return super().run(**inputs)\n"
+            "\n"
+            "class Bucket:\n"
+            "    def __init__(self):\n"
+            "        self.kwargs = {'response_format': {'type': 'json_object'}}\n"
+            "\n"
+            "    def run(self):\n"
+            "        return super().run()\n"
+            "\n"
+            "class ScoreEvaluator:\n"
+            "    def run(self):\n"
+            "        return super().run()\n"
+        )
+        spans, _ = drexify.file_spans("faithfulness.py", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertIn("FaithfulnessEvaluator.run", got)
+        self.assertNotIn("Bucket.run", got)
+        self.assertNotIn("ScoreEvaluator.run", got)
 
     def test_cli_exit_codes_and_json(self):
         good = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
