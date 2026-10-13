@@ -142,6 +142,10 @@ class PluginTests(unittest.TestCase):
         for path in skills:
             self.assertNotIn("${", path.read_text(), path.name)
         self.assertIn("## Find the useful workflow", skill)
+        self.assertIn('"model": "drex-v2.0"', skill)
+        self.assertIn("reads states up to 8,192 tokens", skill)
+        self.assertIn('models --no-input', skill)
+        self.assertNotIn("Examples include `drex-v1.0`", skill)
         self.assertIn("## Design the questions", skill)
         self.assertIn("## Call Drex", skill)
         self.assertIn("`drexify`", skill)
