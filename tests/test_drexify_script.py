@@ -768,6 +768,35 @@ class DrexifyScriptTests(unittest.TestCase):
             self.assertEqual(drexify.main(["check", str(good), "--repo", str(self.repo)]), 1)
             self.assertEqual(drexify.main(["scan", "--repo", str(self.repo), "--groups", "2"]), 0)
 
+    def test_migration_folders_are_skipped_even_with_include_tests(self):
+        skipped = (
+            "backend/alembic/versions/001_init.py",
+            "app/migrations/0001_initial.py",
+            "prisma/migrations/20200101000000_init/migration.ts",
+            "supabase/migrations/001_init.ts",
+            "db/migrations/001_init.js",
+            "db/migrate/20240101000000_create_users.rb",
+            "engines/blog/db/migrate/001_create.rb",
+            "src/main/resources/flyway/V1__init.java",
+        )
+        kept = (
+            "app/migration_utils.py",
+            "services/data_migration_service/run.py",
+            "lib/migrate/helper.rb",
+        )
+        body = "def upgrade():\n    return client.chat.completions.create(model='m')\n"
+        for rel in skipped + kept:
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        for include_tests in (False, True):
+            paths = {f["path"] for a in drexify.scan(self.repo, include_tests=include_tests)["areas"].values()
+                     for f in a["files"]}
+            for rel in skipped:
+                self.assertNotIn(rel, paths, include_tests)
+            for rel in kept:
+                self.assertIn(rel, paths, include_tests)
+
 
 if __name__ == "__main__":
     unittest.main()

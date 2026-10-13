@@ -33,6 +33,7 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dis
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils"}
 FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
+MIGRATION_DIRS = {"alembic", "migrations", "flyway"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
 STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
@@ -162,12 +163,21 @@ def is_test_name(name):
     return name.startswith("test_") or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None
 
 
+def is_migration(parts):
+    dirs = parts[:-1]
+    if any(part in MIGRATION_DIRS for part in dirs):
+        return True
+    return any(part == "migrate" and index and dirs[index - 1] == "db" for index, part in enumerate(dirs))
+
+
 def scannable(rel, include_tests):
     parts = Path(rel).parts
     name = parts[-1]
     if Path(name).suffix not in CODE_EXT or name.endswith(".min.js"):
         return False
     if any(p in SKIP_DIRS or p.startswith(".") for p in parts[:-1]):
+        return False
+    if is_migration(parts):
         return False
     if include_tests:
         return True
