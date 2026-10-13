@@ -109,7 +109,7 @@ Keep questions and thresholds reviewable in one module. Typed output is not a tr
 
 Hosted `model` is optional on the wire, but explicitly pin a supported model in generated clients unless the user wants a moving default. Examples include `drex-v1.0` and `drex-v1.5`; `drex-latest` can move. Do not inherit another client's model default. The hosted 131,072-token state limit belongs to `drex-v1.5`, not the open weights.
 
-Use the backend the user selected. If none is configured and an actual call is needed, ask for hosted or self-hosted and the missing connection details—not for permission to activate the installed skill. Do not silently move a local workload to hosted inference. Keep `DREX_API_KEY` server-side or in a secret manager; never print, commit, or embed it in browser code. Never send it to another provider.
+Use the backend the user selected. If none is configured and an actual call is needed, ask for hosted or self-hosted and the missing connection details. Do not ask for permission to activate the installed skill. Do not silently move a local workload to hosted inference. Keep `DREX_API_KEY` server-side or in a secret manager; never print, commit, or embed it in browser code. Never send it to another provider.
 
 Python serves on port 8000, llama-server on 8097, and the Nace Ollama build on 11434 by the documented defaults. Do not assume any server is running. Follow the self-host README for startup; recommended context is `KEV_CONTEXT=16384` for Python and `SYSTEMONE_CONTEXT=16384` for the native servers, with `-c`, `-b`, and `-ub` matching. The full 32,768 window is opt-in. Values above it fall back to 16,384. Oversized state raises rather than silently truncating.
 
