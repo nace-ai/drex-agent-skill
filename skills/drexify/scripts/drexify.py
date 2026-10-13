@@ -761,14 +761,25 @@ def wrapper_names(spans, found, lines):
     return names
 
 
+def inside_repo(repo, path):
+    if not path.is_symlink():
+        return True
+    try:
+        path.resolve().relative_to(repo.resolve())
+        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def read_scannable(repo, rels):
+    root = repo.resolve()
     for rel in rels:
         path = repo / rel
         try:
-            if path.stat().st_size > MAX_BYTES:
+            if not inside_repo(root, path) or not path.is_file() or path.stat().st_size > MAX_BYTES:
                 continue
             yield rel, path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             continue
 
 
@@ -1090,7 +1101,10 @@ def coverage_review(lines, last_site, fenced_lines):
 def check(report_path, repo, fix=False):
     repo = Path(repo)
     from_stdin = str(report_path) == "-"
-    text = sys.stdin.read() if from_stdin else Path(report_path).read_text(encoding="utf-8")
+    try:
+        text = sys.stdin.read() if from_stdin else Path(report_path).read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"cannot read report {report_path}: {error.strerror or error}")
     writable = fix and not from_stdin
     files = set(list_files(repo))
     by_suffix = {}

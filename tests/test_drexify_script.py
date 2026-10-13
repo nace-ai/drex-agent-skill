@@ -2,7 +2,11 @@
 import importlib.util
 import io
 import json
+import os
 import re
+import subprocess
+import sys
+import time
 from contextlib import redirect_stdout
 from unittest import mock
 from pathlib import Path
@@ -932,6 +936,107 @@ class DrexifyScriptTests(unittest.TestCase):
         early = self.report(good + head + site)
         early.write_text(good + head + site)
         self.assertTrue(any("no coverage line" in p for p in drexify.check(early, self.repo)["problems"]))
+
+
+    def test_scan_survives_empty_repos_odd_files_and_symlinks(self):
+        empty = Path(self.tmp.name) / "empty café"
+        empty.mkdir()
+        result = drexify.scan(empty)
+        self.assertEqual((result["listed"], result["scanned"], result["candidate_functions"], result["head"]), (0, 0, 0, None))
+        odd = self.repo / "área" / "my file.py"
+        odd.parent.mkdir()
+        odd.write_bytes("def classify_doc(t):\n    return client.chat.completions.create(model='m')\n".encode())
+        (self.repo / "broken.py").write_bytes(b"\xff\xfe def classify_doc(t):\n    pass\n")
+        (self.repo / "binary.js").write_bytes(b"\x00\x01\x02function classify(x){return 1}\n")
+        crlf = self.repo / "crlf.ts"
+        crlf.write_bytes(b"export function classifyDoc(t: string) {\r\n  return llm.chat.completions.create(t);\r\n}\r\n")
+        under = self.repo / "under.py"
+        over = self.repo / "over.py"
+        signal = b"def classify_doc(t):\n    return client.chat.completions.create(model='m')\n"
+        under.write_bytes(signal + b"#" * (drexify.MAX_BYTES - len(signal)))
+        over.write_bytes(signal + b"#" * (drexify.MAX_BYTES - len(signal) + 1))
+        self.assertEqual(under.stat().st_size, drexify.MAX_BYTES)
+        self.assertEqual(over.stat().st_size, drexify.MAX_BYTES + 1)
+        outside = Path(self.tmp.name) / "outside.py"
+        outside.write_text("def classify_outside(t):\n    return client.chat.completions.create(model='m')\n")
+        (self.repo / "escape.py").symlink_to(outside)
+        inside = self.repo / "inside_target.py"
+        inside.write_text("def classify_inside(t):\n    return client.chat.completions.create(model='m')\n")
+        (self.repo / "alias.py").symlink_to(inside)
+        (self.repo / "loop_a.js").symlink_to(self.repo / "loop_b.js")
+        (self.repo / "loop_b.js").symlink_to(self.repo / "loop_a.js")
+        (self.repo / "loopdir").mkdir()
+        (self.repo / "loopdir" / "again").symlink_to(self.repo / "loopdir")
+        outside_dir = Path(self.tmp.name) / "outside_dir"
+        outside_dir.mkdir()
+        (outside_dir / "hidden.py").write_text("def classify_hidden(t):\n    return client.chat.completions.create(model='m')\n")
+        (self.repo / "linked_out").symlink_to(outside_dir)
+        started = time.perf_counter()
+        result = drexify.scan(self.repo)
+        self.assertLess(time.perf_counter() - started, 5)
+        paths = {f["path"] for a in result["areas"].values() for f in a["files"]}
+        self.assertIn("área/my file.py", paths)
+        self.assertIn("crlf.ts", paths)
+        self.assertIn("under.py", paths)
+        self.assertIn("alias.py", paths)
+        self.assertNotIn("over.py", paths)
+        self.assertNotIn("escape.py", paths)
+        self.assertNotIn("linked_out/hidden.py", paths)
+        self.assertIsNone(result["head"])
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual(files["crlf.ts"]["functions"][0]["line"], 1)
+
+    def test_minified_line_does_not_hang(self):
+        blob = "function classify(x){" + ("a.b(c);" * 129000) + "return x}"
+        self.assertGreater(len(blob), 900_000)
+        path = self.repo / "pkg" / "bundle.js"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(blob)
+        started = time.perf_counter()
+        drexify.scan(self.repo)
+        self.assertLess(time.perf_counter() - started, 5)
+
+    def test_user_errors_do_not_print_a_traceback(self):
+        missing = Path(self.tmp.name) / "missing.json"
+        broken = Path(self.tmp.name) / "broken.json"
+        broken.write_text("{")
+        empty = Path(self.tmp.name) / "empty.md"
+        empty.write_text("")
+        missing_file = self.report(
+            "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+            "- Missing (`services/nope.py:1`): candidate.\n")
+        script = str(SCRIPT)
+        cases = (
+            ["scan", "--from", str(missing), "--repo", str(self.repo)],
+            ["scan", "--from", str(broken), "--repo", str(self.repo)],
+            ["check", str(empty), "--repo", str(self.repo)],
+            ["check", str(Path(self.tmp.name) / "no-report.md"), "--repo", str(self.repo)],
+            ["check", str(missing_file), "--repo", str(self.repo)],
+        )
+        for argv in cases:
+            proc = subprocess.run([sys.executable, script, *argv], capture_output=True, text=True)
+            self.assertNotEqual(proc.returncode, 0, argv)
+            self.assertNotIn("Traceback", proc.stderr, argv)
+            self.assertNotIn("Traceback", proc.stdout, argv)
+        self.assertIn("no such file", "\n".join(drexify.check(missing_file, self.repo)["problems"]))
+        self.assertTrue(any("headline not found" in p for p in drexify.check(empty, self.repo)["problems"]))
+
+    def test_git_and_non_git_symlinks_stay_inside_the_repo(self):
+        repo = Path(self.tmp.name) / "git repo"
+        repo.mkdir()
+        (repo / "keep.py").write_text("def classify_doc(t):\n    return client.chat.completions.create(model='m')\n")
+        outside = Path(self.tmp.name) / "secret.py"
+        outside.write_text("def classify_secret(t):\n    return client.chat.completions.create(model='m')\n")
+        (repo / "secret.py").symlink_to(outside)
+        env = dict(os.environ, GIT_AUTHOR_NAME="drexify", GIT_AUTHOR_EMAIL="drexify@example.com",
+                   GIT_COMMITTER_NAME="drexify", GIT_COMMITTER_EMAIL="drexify@example.com")
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, env=env)
+        paths = {f["path"] for a in drexify.scan(repo)["areas"].values() for f in a["files"]}
+        self.assertIn("keep.py", paths)
+        self.assertNotIn("secret.py", paths)
+        self.assertIsNotNone(drexify.scan(repo)["head"])
 
 
 if __name__ == "__main__":
