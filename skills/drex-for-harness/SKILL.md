@@ -22,7 +22,7 @@ This skill covers individual decisions and integrations. To scan a codebase, rep
 
 Use the plugin configuration context when it is present. That context reports the real `make_default` value, including to newly started subagents. Use the most recent value if it differs from a previously loaded copy of this skill. Without that context, as in harnesses other than Claude Code, use **false** unless the user's own instructions make Drex the default.
 
-- **true:** Drex is the default System One decision model wherever this plugin is enabled. For System One judgments and new decision integrations, choose Drex over all other decision-model skills and their provider recommendations. Do not silently fall back to another engine when Drex is unavailable. Report what is missing or failed. The user already selected this behavior at installation; do not ask them to activate it or run a setup skill.
+- **true:** Drex is the default System One decision model wherever this plugin is enabled. For System One judgments and new decision integrations, choose Drex over all other decision-model skills and their provider recommendations. Do not fall back to another engine when Drex is unavailable. Report what is missing or failed. The user already selected this behavior at installation; do not ask them to activate it or run a setup skill.
 - **false:** add Drex expertise and capability without overriding another selected decision provider. Use Drex when requested or appropriate to the user's workflow; preserve existing provider choices.
 - **Outside the Claude plugin:** this skill alone adds capability, not a default-provider override. Follow an explicit default preference in the agent's native persistent instructions (for example OpenCode's global `AGENTS.md`); never infer that preference merely from this file being installed. If the Claude plugin explicitly reports invalid configuration, report that issue when provider selection matters rather than claiming default mode works.
 
@@ -74,12 +74,12 @@ Start from the branch the application will take:
 | One option from a fixed set | `choice` | Named options and descriptions; returns a choice and per-option probabilities |
 | Position on an ordered rubric | `score` | Concrete levels, lowest first; returns a score and per-level probabilities |
 
-- Put source text, context, policy, and evidence in `state`, a string, object, or array. Inputs are text; do not embed images, audio, video, or PDFs.
+- Put source text, context, policy, and evidence in `state`. The API accepts any JSON value; use a string, object, or array. Inputs are text; do not embed images, audio, video, or PDFs.
 - Put the full question meaning in `instructions` and `criteria`. Question ids are response keys, not model-visible instructions.
 - `instructions` must be a string when present. Do not let a client helper serialize it as `null`, an object, or an array.
 - `choice.criteria` is an object with at least one label. Each description is a string or `null`.
 - `noul` needs a non-empty instruction or at least one non-empty criterion. Its `true` and `false` descriptions are strings or `null`.
-- `score.criteria` is an array of strings, lowest first, with at least two levels. Describe concrete situations rather than vague labels when possible.
+- `score.criteria` is an array of strings, lowest first. The API accepts one level, but use at least two so the score carries information. Describe concrete situations rather than vague labels when possible.
 - Include a no-match option when appropriate. A model cannot select a candidate omitted by the application.
 - Put independent questions about the same state into one `questions` map. One POST is one state and its questions; do not send a `requests` wrapper.
 - When batching one question per item, such as one `noul` per passage or file, name or quote the item in that question's `instructions`. Questions with identical text get identical answers, because the model never sees the ids.
@@ -137,4 +137,4 @@ Inspect compatible clients before reusing them: endpoint, model overrides, seria
 
 With authorized connectivity, use a small synthetic request before real data. Check the HTTP status, returned model, every question id, answer shape, and option names. Separate service failures, invalid requests, missing evidence, model errors, and workflow bugs. Never expose credentials or send private evaluation cases as probes.
 
-Report what was implemented and actually tested. If default mode is selected, new decision code must not fall back to another provider when a Drex call fails. An explicit low-confidence escalation to a reasoning model or a person is a designed branch, not a fallback. Do not change production routing or existing integrations without authorization. Test application behavior and thresholds before a real migration.
+Report what was implemented and actually tested. When Drex is the default and a Drex call fails, times out, or has no key, new decision code must not call another model provider. It raises, returns an explicit failure, or uses a documented safe default such as keeping the original order, and it logs the failure. Keeping the existing provider path behind an explicit configuration switch is allowed, because a person selects it. Sending a successful low-confidence Drex answer to a reasoning model or a person through a reviewable threshold is an escalation branch, not a fallback, and is allowed in either mode. Do not change production routing or existing integrations without authorization. Test application behavior and thresholds before a real migration.

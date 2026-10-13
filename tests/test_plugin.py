@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -226,6 +227,25 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("/reload-plugins", readme)
         self.assertNotIn("drex-default", readme + skill)
         self.assertIsNone(re.search(r"jev|typesafe", readme + skill, re.I))
+
+    def test_skill_example_report_passes_check(self):
+        skill = (ROOT / "skills" / "drexify" / "SKILL.md").read_text(encoding="utf-8")
+        example = skill.split("```text\n", 1)[1].split("```", 1)[0]
+        pointers = re.findall(r"`([\w/]+\.py):(\d+)`", example)
+        self.assertGreaterEqual(len(pointers), 5)
+        with tempfile.TemporaryDirectory() as folder:
+            for rel, line in pointers:
+                path = Path(folder) / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                body = ["# filler"] * (int(line) - 1) + ["def decide(text):", "    return text", ""]
+                path.write_text("\n".join(body), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "skills" / "drexify" / "scripts" / "drexify.py"),
+                 "check", "-", "--repo", folder],
+                input=example, capture_output=True, text=True, timeout=60,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], "ok")
 
 
 if __name__ == "__main__":

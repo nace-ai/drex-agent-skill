@@ -19,7 +19,7 @@ Map every place a codebase makes a semantic judgment, report the whole picture f
 
 This skill decides where Drex fits. The `drex-for-harness` skill covers how to call it: question design, the request contract, credentials, the bundled helper, and verification. Load it before designing questions or writing a call. If it is not installed, read the live Drex docs at `https://drex.nace.ai/docs/drex` before writing any integration, and do not guess fields, model ids, or limits.
 
-Whether Drex is the user's default decision provider is decided by the provider preference rules in `drex-for-harness`. When Drex is the default, new decision code must not silently fall back to another provider when a Drex call fails. Keeping the existing provider path behind an explicit configuration switch is allowed. Sending low-confidence answers to a reasoning model or a person through an explicit, reviewable threshold is an escalation branch, not a fallback, and is allowed in either mode.
+Whether Drex is the user's default decision provider is decided by the provider preference rules in `drex-for-harness`. When Drex is the default and a Drex call fails, times out, or has no key, new decision code must not call another model provider. It raises, returns an explicit failure, or uses a documented safe default such as keeping the original order, and it logs the failure. Keeping the existing provider path behind an explicit configuration switch is allowed, because a person selects it. Sending a successful low-confidence Drex answer to a reasoning model or a person through a reviewable threshold is an escalation branch, not a fallback, and is allowed in either mode.
 
 ## The bundled script
 
@@ -80,7 +80,7 @@ Pick the shape from the branch the code takes: `noul` for yes or no, `choice` fo
 Write the headline with all four counts in this order, then one line per site grouped by product area:
 
 ```text
-Your repo has been scanned. Identified 23 sites of drexification (5 already on Drex, 3 partial, 2 implemented now, 13 candidates). Below is the list of processes:
+Your repo has been scanned. Identified 5 sites of drexification (1 already on Drex, 1 partial, 1 implemented now, 2 candidates). Below is the list of processes:
 
 - Document splitting (`src/ingest/split.py:42`): already on Drex, choice over document types.
 - Document classification (`src/ingest/classify.py:88`): implemented now, choice over 11 section types, behind `USE_DREX_CLASSIFY`.
@@ -113,7 +113,7 @@ Coverage: checked 61 of 61 candidate functions. Read `src/ingest`, `src/search`,
 1. Design the questions with `drex-for-harness`. Keep the current mechanism's labels or outputs so callers do not change.
 2. Put the new path behind the repository's configuration mechanism unless the user asks for a direct switch.
 3. Compare Drex against the current mechanism on representative examples before recommending a default. Report accuracy, latency, and cost only from runs that actually happened. When the current mechanism cannot run, for example because no provider key is available, report the comparison as not run. Never print or report a baseline number that the comparison did not compute.
-4. Decide and state what happens when the Drex call fails, times out, or has no key: which path runs, and whether that is the existing mechanism, an error, or a default value. Test that path. Report it per site, and do not describe every site with one sentence unless each was checked.
+4. Decide and state what happens when the Drex call fails, times out, or has no key: which path runs, and whether it is an error, a logged safe default, or the existing mechanism. The existing mechanism is allowed only outside default mode or behind an explicit switch. Test that path. Report it per site, and do not describe every site with one sentence unless each was checked.
 5. Update the site's status in the summary, rerun `check`, and report what was changed and tested.
 
 Do not change production routing, credentials, or unrelated code without authorization.
