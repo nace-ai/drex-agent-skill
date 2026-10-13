@@ -844,9 +844,12 @@ class DrexifyScriptTests(unittest.TestCase):
         skipped = (
             "models.vitest.ts", "lineStream.vitest.tsx", "a.vitest.js", "a.vitest.mjs", "a.vitest.cjs",
             "flow.e2e.ts", "parse.bench.js", "foo_test.go", "test_foo.py", "foo_test.py", "foo.test.ts",
-            "foo.spec.js", "FooTest.java", "FooTests.java", "FooIT.java", "FooTest.kt", "foo_spec.rb",
+            "foo.spec.js", "FooTest.java", "FooTests.java", "FooIT.java", "FooTest.kt", "FooTests.kt",
+            "foo_spec.rb", "FooTest.cs", "FooTests.cs", "FooTest.php", "FooSpec.scala", "FooTest.scala",
+            "FooTests.swift", "tests.py",
         )
-        kept = ("latest.ts", "contest.py", "attestation.go", "Testimonial.java", "migration_utils.py")
+        kept = ("latest.ts", "contest.py", "attestation.go", "Testimonial.java", "migration_utils.py",
+                "ab_test.py", "ab_test.ts", "split_test.py", "load_test.py", "stress_test.py", "smoke_test.py")
         for name in skipped + kept:
             self.assertEqual(drexify.is_test_name(name), name in skipped, name)
         for name in skipped + kept:
@@ -858,6 +861,26 @@ class DrexifyScriptTests(unittest.TestCase):
             self.assertNotIn(f"pkg/{name}", paths, name)
         for name in kept:
             self.assertIn(f"pkg/{name}", paths, name)
+
+    def test_test_folders_cover_swift_and_kotlin_source_sets(self):
+        hidden = (
+            "App/Tests/Check.swift",
+            "src/jvmTest/kotlin/Check.kt",
+            "src/commonTest/kotlin/Check.kt",
+            "src/jsTest/kotlin/Check.kt",
+            "src/iosTest/kotlin/Check.kt",
+            "src/linuxTest/kotlin/Check.kt",
+        )
+        shown = "src/main/kotlin/Check.kt"
+        text = "fun classifyDoc() { client.chat.completions.create(model) }\n"
+        for rel in hidden + (shown,):
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn(shown, paths)
+        for rel in hidden:
+            self.assertNotIn(rel, paths, rel)
 
     def test_prompt_constants_are_not_candidate_functions(self):
         text = (

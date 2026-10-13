@@ -164,15 +164,41 @@ def git_state(repo):
 
 
 TEST_FILE = re.compile(
-    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs)|_spec\.rb|(?:Test|Tests|IT)\.java|Test\.kt)$")
+    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs)|_spec\.rb|"
+    r"(?:Test|Tests|IT)\.java|Tests?\.kt|Tests?\.cs|Test\.php|(?:Spec|Test)\.scala|Tests\.swift)$")
+_EXEMPT_TEST_STEMS = ("ab_test", "split_test", "load_test", "stress_test", "smoke_test")
+_TEST_DIR_NAMES = {name.lower() for name in TEST_DIRS}
+
+
+def _production_experiment_name(name):
+    """Production modules whose stem ends in ab_test, split_test, load_test, stress_test, or smoke_test."""
+    stem = Path(name).stem
+    for suffix in _EXEMPT_TEST_STEMS:
+        if stem == suffix or stem.endswith("_" + suffix):
+            return True
+    return False
 
 
 def is_test_name(name):
-    return name.startswith("test_") or TEST_FILE.search(name) is not None
+    if name == "tests.py" or name.startswith("test_"):
+        return True
+    if _production_experiment_name(name):
+        return False
+    return TEST_FILE.search(name) is not None
+
+
+def is_test_dir(name):
+    return name.lower() in _TEST_DIR_NAMES
 
 
 def under_source_test_root(dirs):
-    return any(dirs[i] == "src" and dirs[i + 1] in SOURCE_TEST_ROOTS for i in range(len(dirs) - 1))
+    for index in range(len(dirs) - 1):
+        if dirs[index] != "src":
+            continue
+        name = dirs[index + 1]
+        if name in SOURCE_TEST_ROOTS or name.endswith("Test"):
+            return True
+    return False
 
 
 def is_migration(parts):
@@ -206,7 +232,7 @@ def scannable(rel, include_tests):
     dirs = parts[:-1]
     if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs) or under_source_test_root(dirs):
         return False
-    last_test = max((i for i, p in enumerate(dirs) if p in TEST_DIRS), default=-1)
+    last_test = max((i for i, p in enumerate(dirs) if is_test_dir(p)), default=-1)
     return last_test < 0 or any(p in EVAL_DIRS for p in dirs[last_test + 1:])
 
 
