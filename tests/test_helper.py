@@ -583,11 +583,15 @@ class TransportAndCheckTests(OfflineTestCase):
 
     def test_http_errors_and_redirects_redact_url_reason_body_and_key(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
-        expected = {401: "Authentication failed", 402: "insufficient credit",
-                    422: "Do not retry unchanged", 429: "rate limit",
-                    500: "bounded policy", 529: "unavailable"}
-        for status in (301, 302, 303, 307, 308, 400, 401, 402, 403, 404, 422,
-                       429, 500, 502, 529):
+        expected = {400: "malformed", 401: "Authentication failed",
+                    402: "insufficient credit", 403: "refused access",
+                    404: "could not find", 408: "request timed out",
+                    413: "too large", 422: "Do not retry unchanged",
+                    429: "rate limit", 500: "bounded policy",
+                    503: "temporarily unavailable", 504: "gateway timed out",
+                    529: "unavailable"}
+        for status in (301, 302, 303, 307, 308, 400, 401, 402, 403, 404, 408,
+                       413, 422, 429, 500, 502, 503, 504, 529):
             with self.subTest(status=status):
                 raw = io.BytesIO((PRIVATE_SERVER + PRIVATE_INPUT + SYNTHETIC_KEY).encode())
                 error = urllib.error.HTTPError(

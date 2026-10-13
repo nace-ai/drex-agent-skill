@@ -108,11 +108,18 @@ def request(key, path, data=None):
             raw = response.read(RESPONSE_LIMIT + 1)
     except urllib.error.HTTPError as error:
         messages = {
+            400: "Drex rejected the request as malformed. Do not retry unchanged.",
             401: "Authentication failed; check or replace your Drex key.",
             402: "Drex account has insufficient credit.",
+            403: "Drex refused access to this resource. Do not retry unchanged.",
+            404: "Drex could not find that resource. Do not retry unchanged.",
+            408: "The request timed out before Drex finished it. Retry later with a bounded policy.",
+            413: "Drex rejected the request as too large. Do not retry unchanged.",
             422: "Drex rejected the request; check fields, model, and context limits. Do not retry unchanged.",
             429: "Drex rate limit reached; retry later according to the service retry policy.",
             500: "Drex encountered a service error; retry only with a bounded policy.",
+            503: "Drex is temporarily unavailable. Retry later with a bounded policy.",
+            504: "Drex gateway timed out. Retry later with a bounded policy.",
             529: "Drex is unavailable; retry later or queue for review.",
         }
         raise HelperError(messages.get(error.code, "Drex returned an unexpected HTTP status (redirects are not followed).")) from None
