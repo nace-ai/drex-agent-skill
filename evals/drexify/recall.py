@@ -3,7 +3,8 @@
 
 Checks out each pinned repo under the cache, or reuses a checkout already at that
 commit, then runs drexify.py scan (never with --include-tests). A known site counts
-when its path and function name are on the candidate list. Repos with no sites report
+when its path and function name are on the candidate list. The flagged-files column counts
+known sites whose file the scan flagged, which agents open even without a candidate. Repos with no sites report
 candidate counts only. --extra scans a local repo and reports its candidate count.
 
     python3 evals/drexify/recall.py
@@ -108,21 +109,30 @@ def candidate_keys(scan_map):
     return keys
 
 
+def flagged_paths(scan_map):
+    return {item["path"] for area in scan_map.get("areas", {}).values() for item in area.get("files", [])}
+
+
 def score_repo(spec, scan_map, seconds):
     keys = candidate_keys(scan_map)
+    flagged = flagged_paths(scan_map)
     missing = []
     found = 0
+    in_files = 0
     for site in spec.get("sites") or []:
+        in_files += site["path"] in flagged
         if (site["path"], site["function"]) in keys:
             found += 1
         else:
-            missing.append({"path": site["path"], "line": site["line"], "function": site["function"]})
+            missing.append({"path": site["path"], "line": site["line"], "function": site["function"],
+                            "file_flagged": site["path"] in flagged})
     known = len(spec.get("sites") or [])
     return {
         "name": spec["name"],
         "commit": spec["commit"],
         "known": known,
         "found": found if known else None,
+        "found_in_files": in_files if known else None,
         "missing": missing,
         "candidate_functions": scan_map["candidate_functions"],
         "scanned": scan_map["scanned"],
@@ -142,26 +152,29 @@ def score_extra(path, scan_map, seconds):
 def totals(repos):
     known = sum(repo["known"] for repo in repos)
     found = sum(repo["found"] or 0 for repo in repos)
+    in_files = sum(repo["found_in_files"] or 0 for repo in repos)
     return {
         "known": known,
         "found": found if known else None,
+        "found_in_files": in_files if known else None,
         "candidate_functions": sum(repo["candidate_functions"] for repo in repos),
         "scanned": sum(repo["scanned"] for repo in repos),
         "seconds": round(sum(repo["seconds"] for repo in repos), 2),
     }
 
 
-def recall_text(row):
+def recall_text(row, field="found"):
     if not row["known"]:
         return "n/a"
-    return f"{row['found']} of {row['known']}"
+    return f"{row[field]} of {row['known']}"
 
 
 def print_report(report):
-    header = ("repo", "recall", "candidates", "scanned", "seconds")
+    header = ("repo", "recall", "in flagged files", "candidates", "scanned", "seconds")
     body = [(
         repo["name"],
         recall_text(repo),
+        recall_text(repo, "found_in_files"),
         str(repo["candidate_functions"]),
         str(repo["scanned"]),
         f"{repo['seconds']:.2f}",
@@ -170,6 +183,7 @@ def print_report(report):
     body.append((
         "total",
         recall_text(total),
+        recall_text(total, "found_in_files"),
         str(total["candidate_functions"]),
         str(total["scanned"]),
         f"{total['seconds']:.2f}",
@@ -186,7 +200,8 @@ def print_report(report):
     for repo, row in zip(report["repos"], body[:-1]):
         print(line(row))
         for site in repo["missing"]:
-            print(f"  missing {site['path']}:{site['line']} {site['function']}")
+            where = "file flagged" if site["file_flagged"] else "file not flagged"
+            print(f"  missing {site['path']}:{site['line']} {site['function']} ({where})")
     print(line(body[-1]))
     for extra in report["extras"]:
         print(

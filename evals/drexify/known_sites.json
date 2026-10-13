@@ -440,6 +440,25 @@
           "function": "decide_search_scope"
         }
       ]
+    },
+    {
+      "name": "pr-agent",
+      "url": "https://github.com/qodo-ai/pr-agent.git",
+      "commit": "330f0813b5fe0d1f54b794077c2d02aa85a1fb63",
+      "language": "python",
+      "note": "Fresh held-out repo for the launch hardening release. Nothing was tuned on it. The self-reflection scorer is generation because the same reply supplies line numbers and published text.",
+      "sites": [
+        {
+          "path": "pr_agent/mosaico/dispatch.py",
+          "line": 159,
+          "function": "_resolve_verb"
+        },
+        {
+          "path": "pr_agent/tools/pr_generate_labels.py",
+          "line": 198,
+          "function": "PRGenerateLabels._get_prediction"
+        }
+      ]
     }
   ]
 }
