@@ -817,6 +817,25 @@ class DrexifyScriptTests(unittest.TestCase):
         with_tests = {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]}
         self.assertIn(hidden[0], with_tests)
 
+    def test_test_file_names_cover_vitest_e2e_bench_and_jvm(self):
+        skipped = (
+            "models.vitest.ts", "lineStream.vitest.tsx", "a.vitest.js", "a.vitest.mjs", "a.vitest.cjs",
+            "flow.e2e.ts", "parse.bench.js", "foo_test.go", "test_foo.py", "foo_test.py", "foo.test.ts",
+            "foo.spec.js", "FooTest.java", "FooTests.java", "FooIT.java", "FooTest.kt", "foo_spec.rb",
+        )
+        kept = ("latest.ts", "contest.py", "attestation.go", "Testimonial.java", "migration_utils.py")
+        for name in skipped + kept:
+            self.assertEqual(drexify.is_test_name(name), name in skipped, name)
+        for name in skipped + kept:
+            path = self.repo / "pkg" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("function classifyDoc() { return client.chat.completions.create(1) }\n")
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        for name in skipped:
+            self.assertNotIn(f"pkg/{name}", paths, name)
+        for name in kept:
+            self.assertIn(f"pkg/{name}", paths, name)
+
 
 if __name__ == "__main__":
     unittest.main()

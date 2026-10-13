@@ -160,8 +160,12 @@ def git_state(repo):
         return None, None
 
 
+TEST_FILE = re.compile(
+    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs)|_spec\.rb|(?:Test|Tests|IT)\.java|Test\.kt)$")
+
+
 def is_test_name(name):
-    return name.startswith("test_") or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None
+    return name.startswith("test_") or TEST_FILE.search(name) is not None
 
 
 def under_source_test_root(dirs):
