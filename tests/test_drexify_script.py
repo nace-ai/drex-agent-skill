@@ -1142,6 +1142,25 @@ class DrexifyScriptTests(unittest.TestCase):
         ]
         self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
 
+    def test_check_does_not_read_unsafe_pointers(self):
+        outside = Path(self.tmp.name) / "outside.py"
+        outside.write_text("def classify_doc(t):\n    return 1\n")
+        (self.repo / "escape.py").symlink_to(outside)
+        (self.repo / "zero.py").symlink_to("/dev/zero")
+        huge = self.repo / "huge.py"
+        huge.write_bytes(b"def classify_doc(t):\n    return 1\n" + b"#" * drexify.MAX_BYTES)
+        started = time.perf_counter()
+        for rel in ("escape.py", "huge.py", "zero.py"):
+            body = (
+                "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+                f"- Bad (`{rel}:1`): candidate.\n"
+                "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+                "0 not decisions, 0 dead. 0 more sites. 1 site line in total.\n"
+            )
+            problems = drexify.check(self.report(body), self.repo)["problems"]
+            self.assertTrue(any("cannot read" in problem for problem in problems), (rel, problems))
+        self.assertLess(time.perf_counter() - started, 5)
+
     def test_coverage_total_matches_the_listed_site_lines(self):
         def head(count):
             return (f"Identified {count} sites of drexification "

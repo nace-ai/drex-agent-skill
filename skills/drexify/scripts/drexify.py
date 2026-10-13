@@ -869,16 +869,23 @@ def inside_repo(repo, path):
         return False
 
 
+def guarded_text(repo, rel):
+    """Text of a regular file inside the repo, or None when it must not be read."""
+    root = Path(repo).resolve()
+    path = Path(repo) / rel
+    try:
+        if not inside_repo(root, path) or not path.is_file() or path.stat().st_size > MAX_BYTES:
+            return None
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 def read_scannable(repo, rels):
-    root = repo.resolve()
     for rel in rels:
-        path = repo / rel
-        try:
-            if not inside_repo(root, path) or not path.is_file() or path.stat().st_size > MAX_BYTES:
-                continue
-            yield rel, path.read_text(encoding="utf-8", errors="ignore")
-        except (OSError, RuntimeError, ValueError):
-            continue
+        text = guarded_text(repo, rel)
+        if text is not None:
+            yield rel, text
 
 
 def suggested_groups(functions):
@@ -1075,18 +1082,24 @@ def print_scan(result, area=None, group=0):
 def line_counts(repo, files, cache):
     def count(rel):
         if rel not in cache:
-            try:
-                cache[rel] = len((repo / rel).read_text(encoding="utf-8", errors="ignore").splitlines())
-            except OSError:
-                cache[rel] = 0
+            text = guarded_text(repo, rel)
+            cache[rel] = None if text is None else len(text.splitlines())
         return cache[rel]
     return count
+
+
+def bounded_line(line, total, rel):
+    if total is None:
+        return None, f"cannot read {rel}"
+    if not 1 <= line <= total:
+        return None, f"line {line} is past the end of {rel}"
+    return rel, None
 
 
 def resolve(raw, line, files, by_suffix, count):
     """Return (full_path or None, problem or None)."""
     if raw in files:
-        return (raw, None) if 1 <= line <= count(raw) else (None, f"line {line} is past the end of {raw}")
+        return bounded_line(line, count(raw), raw)
     if "{" in raw or "}" in raw:
         return None, "brace groups cannot be checked, write each path in full"
     tail = raw.split(".../")[-1].split("…/")[-1].lstrip("./")
@@ -1095,9 +1108,7 @@ def resolve(raw, line, files, by_suffix, count):
         return None, "no such file"
     if len(matches) > 1:
         return None, f"ambiguous, matches {len(matches)} files: {', '.join(matches[:3])}"
-    if not 1 <= line <= count(matches[0]):
-        return None, f"line {line} is past the end of {matches[0]}"
-    return matches[0], None
+    return bounded_line(line, count(matches[0]), matches[0])
 
 
 UNCOUNTED = re.compile(r"^(?:not counted|plan|implementation plan)\b")
@@ -1145,11 +1156,10 @@ def site_start(repo, rel, line, cache):
     if Path(rel).suffix not in CODE_EXT:
         return line, None
     if rel not in cache:
-        try:
-            text = (repo / rel).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            text = ""
-        cache[rel] = (*file_spans(rel, text), text.splitlines())
+        text = guarded_text(repo, rel)
+        cache[rel] = None if text is None else (*file_spans(rel, text), text.splitlines())
+    if cache[rel] is None:
+        return line, f"cannot read {rel}"
     spans, parsed, lines = cache[rel]
     def preamble(i):
         text = lines[i].strip()
