@@ -225,6 +225,11 @@
           "function": "detectPromptInjection"
         },
         {
+          "path": "packages/editor/src/namespaces/scorer.ts",
+          "line": 118,
+          "function": "EditorScorerNamespace.resolve"
+        },
+        {
           "path": "packages/evals/src/scorers/code/tone/index.ts",
           "line": 9,
           "function": "createToneScorer"
@@ -389,6 +394,50 @@
           "path": "chains/map_rerank_documents.go",
           "line": 70,
           "function": "Call"
+        }
+      ]
+    },
+    {
+      "name": "onyx",
+      "url": "https://github.com/onyx-dot-app/onyx.git",
+      "commit": "6fed167d8ecf304022d69f39c9ad1dc7109d591c",
+      "language": "python",
+      "note": "Held out until the launch hardening changes, which were tuned on it. The scan listed 5 of 7 at d712026. The Slack question-mark prefilter in handle_message is a borderline site.",
+      "sites": [
+        {
+          "path": "backend/ee/onyx/db/standard_answer.py",
+          "line": 266,
+          "function": "find_matching_standard_answers"
+        },
+        {
+          "path": "backend/ee/onyx/secondary_llm_flows/search_flow_classification.py",
+          "line": 22,
+          "function": "classify_is_search_flow"
+        },
+        {
+          "path": "backend/onyx/context/search/federated/slack_search_utils.py",
+          "line": 102,
+          "function": "is_recency_query"
+        },
+        {
+          "path": "backend/onyx/onyxbot/slack/handlers/handle_message.py",
+          "line": 146,
+          "function": "handle_message"
+        },
+        {
+          "path": "backend/onyx/secondary_llm_flows/document_filter.py",
+          "line": 102,
+          "function": "classify_section_relevance"
+        },
+        {
+          "path": "backend/onyx/secondary_llm_flows/document_filter.py",
+          "line": 217,
+          "function": "select_sections_for_expansion"
+        },
+        {
+          "path": "backend/onyx/secondary_llm_flows/source_filter.py",
+          "line": 60,
+          "function": "decide_search_scope"
         }
       ]
     }
