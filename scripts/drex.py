@@ -55,7 +55,7 @@ def encode_request(body):
     if not isinstance(questions, dict) or not 1 <= len(questions) <= 512:
         raise HelperError("questions must be a map containing 1 to 512 questions.")
     model = body.get("model")
-    if not isinstance(model, str) or not re.fullmatch(r"drex-[A-Za-z0-9.-]+", model):
+    if not isinstance(model, str) or not re.fullmatch(r"drex-[A-Za-z0-9][A-Za-z0-9.-]*", model):
         raise HelperError("Set an explicit Drex model from the current model catalog.")
     if set(body) - {"state", "questions", "model"}:
         raise HelperError("Unknown request field; use one state and questions map, not a requests wrapper.")
@@ -119,11 +119,15 @@ def request(key, path, data=None):
             422: "Drex rejected the request; check fields, model, and context limits. Do not retry unchanged.",
             429: "Drex rate limit reached; retry later according to the service retry policy.",
             500: "Drex encountered a service error; retry only with a bounded policy.",
+            502: "Drex gateway returned a bad response. Retry later with a bounded policy.",
             503: "Drex is temporarily unavailable. Retry later with a bounded policy.",
             504: "Drex gateway timed out. Retry later with a bounded policy.",
             529: "Drex is unavailable; retry later or queue for review.",
         }
-        raise HelperError(messages.get(error.code, "Drex returned an unexpected HTTP status (redirects are not followed).")) from None
+        code = error.code
+        # An unclosed error emits a ResourceWarning that repeats the server's reason text on stderr.
+        error.close()
+        raise HelperError(messages.get(code, "Drex returned an unexpected HTTP status (redirects are not followed).")) from None
     except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
         raise HelperError("Could not reach Drex securely. No alternative provider was called.") from None
     if len(raw) > RESPONSE_LIMIT:
@@ -148,7 +152,8 @@ def model_lines(result, key):
         alias = model.get("alias_for")
         head = name + " -> " + alias if isinstance(alias, str) and alias.strip() else name
         fields = [head] + [model[f] for f in ("release_date", "description") if isinstance(model.get(f), str)]
-        line = "  ".join(" ".join(field.split()) for field in fields)
+        printable = ("".join(ch if ch.isprintable() else " " for ch in field) for field in fields)
+        line = "  ".join(" ".join(field.split()) for field in printable)
         lines.append(line.replace(key, "[REDACTED]"))
     return lines
 
@@ -165,7 +170,7 @@ def validate_response(result, body):
     if not isinstance(result, dict) or not {"model", "answers", "usage", "evaluation_time_ms", "request_id"} <= result.keys():
         raise invalid
     # Aliases/retired IDs may resolve to another model; return the served model to the caller.
-    if not isinstance(result["model"], str) or not re.fullmatch(r"drex-[A-Za-z0-9.-]+", result["model"]):
+    if not isinstance(result["model"], str) or not re.fullmatch(r"drex-[A-Za-z0-9][A-Za-z0-9.-]*", result["model"]):
         raise invalid
     if not isinstance(result["request_id"], str) or not re.fullmatch(r"req_[a-f0-9]{32}", result["request_id"]):
         raise invalid
@@ -240,7 +245,8 @@ def main(argv=None):
             key = api_key(interactive=True)
             env = dict(os.environ, DREX_API_KEY=key)
             try:
-                return subprocess.run(command, env=env).returncode
+                code = subprocess.run(command, env=env).returncode
+                return 128 - code if code < 0 else code
             except OSError:
                 raise HelperError("Could not launch the requested command.") from None
         if args.action == "check":

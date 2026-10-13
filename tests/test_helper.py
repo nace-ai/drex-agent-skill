@@ -76,6 +76,14 @@ def valid_response():
     }
 
 
+class UnreadBody(io.BytesIO):
+    reads = 0
+
+    def read(self, *args):
+        self.reads += 1
+        return super().read(*args)
+
+
 class OfflineTestCase(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="drex helper offline ")
@@ -295,6 +303,13 @@ class RunTests(OfflineTestCase):
         self.assertEqual(list(self.folder.iterdir()), [])
         self.network.assert_not_called()
         self.prompt.assert_not_called()
+
+    def test_run_reports_a_signalled_child_as_128_plus_signal(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        self.child.side_effect = None
+        self.child.return_value.returncode = -15
+        code, _, _ = self.invoke(["run", "--", "synthetic-agent"])
+        self.assertEqual(code, 143)
 
     def test_run_prompted_key_only_reaches_child_not_parent_or_disk(self):
         self.stdin.isatty.return_value = True
@@ -621,12 +636,12 @@ class TransportAndCheckTests(OfflineTestCase):
                     404: "could not find", 408: "request timed out",
                     413: "too large", 422: "Do not retry unchanged",
                     429: "rate limit", 500: "bounded policy",
-                    503: "temporarily unavailable", 504: "gateway timed out",
+                    502: "bad response", 503: "temporarily unavailable", 504: "gateway timed out",
                     529: "unavailable"}
         for status in (301, 302, 303, 307, 308, 400, 401, 402, 403, 404, 408,
                        413, 422, 429, 500, 502, 503, 504, 529):
             with self.subTest(status=status):
-                raw = io.BytesIO((PRIVATE_SERVER + PRIVATE_INPUT + SYNTHETIC_KEY).encode())
+                raw = UnreadBody((PRIVATE_SERVER + PRIVATE_INPUT + SYNTHETIC_KEY).encode())
                 error = urllib.error.HTTPError(
                     "https://example.invalid/" + SYNTHETIC_KEY, status,
                     PRIVATE_SERVER + SYNTHETIC_KEY, {"Location": PRIVATE_INPUT}, raw,
@@ -636,8 +651,8 @@ class TransportAndCheckTests(OfflineTestCase):
                 stderr = self.assert_failure(self.invoke(["check"]))
                 self.assertIn(expected.get(status, "unexpected HTTP status"), stderr)
                 opener.open.assert_called_once()  # No retry or alternative provider.
-                self.assertEqual(raw.tell(), 0)  # Never read/print the error body.
-                error.close()
+                self.assertEqual(raw.reads, 0)  # Never read/print the error body.
+                self.assertTrue(raw.closed)  # No ResourceWarning repeating the reason text.
 
     def test_connection_and_read_failures_are_sanitized(self):
         os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
@@ -768,7 +783,7 @@ class JudgeAndResponseTests(OfflineTestCase):
             result = valid_response()
             del result[field]
             cases.append(result)
-        for value in (None, [], "not-drex", 1):
+        for value in (None, [], "not-drex", 1, "drex-.", "drex--"):
             result = valid_response()
             result["model"] = value
             cases.append(result)
@@ -973,6 +988,11 @@ class ModelsCommandTests(OfflineTestCase):
         code, stdout, stderr = self.invoke(["models", "--no-input"])
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(stdout.splitlines(), ["drex-v1.0  Line one line two [REDACTED]", "drex-v9"])
+        sparse["models"] = [{"name": "drex-v1.0", "description": "Red \x1b[31mtext\x1b[0m\x07 \u202eend"}]
+        self.allow_response(sparse)
+        code, stdout, stderr = self.invoke(["models", "--no-input"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(stdout.splitlines(), ["drex-v1.0  Red [31mtext [0m end"])
         bad["models"] = [{
             "name": " ",
             "description": PRIVATE_INPUT,
