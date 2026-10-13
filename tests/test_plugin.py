@@ -167,6 +167,9 @@ class PluginTests(unittest.TestCase):
         self.assertIn("export DREX_API_KEY='paste-your-key-here'", readme)
         self.assertIn("claude plugin marketplace add nace-ai/drex-agent-skills", readme)
         self.assertIn("claude plugin install drex@nace-ai --config make_default=true", readme)
+        self.assertIn("Not logged in · Please run /login", readme)
+        self.assertIn("~/.zshrc", readme)
+        self.assertIn("https://learn.chatgpt.com/docs/build-skills", readme)
         clone = 'git clone --depth 1 https://github.com/nace-ai/drex-agent-skills.git "$HOME/drex-agent-skills"'
         local_agents = ("OpenCode", "Cursor", "GitHub Copilot", "Windsurf", "Cline", "OpenClaw", "DeepSeek Harness", "Other harness")
         native_agents = ("Claude Code", "Hermes Agent", "Codex", "Gemini CLI", "Pi")

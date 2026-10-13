@@ -27,7 +27,7 @@ Run your agent from that terminal so it inherits the key.
 
 ### Claude Code
 
-Use the [native plugin installer](https://code.claude.com/docs/en/plugins/install) to make Drex the default System One model:
+Use the [native plugin installer](https://code.claude.com/docs/en/plugins/install) to make Drex the default System One model. Run `/login` first if Claude Code says `Not logged in · Please run /login`.
 
 ```bash
 claude plugin marketplace add nace-ai/drex-agent-skills
@@ -75,7 +75,7 @@ Restart Hermes after installation to load Drex and apply credential passthrough.
 
 ### Codex
 
-Use Codex's [built-in `$skill-installer`](https://developers.openai.com/codex/skills) in a Codex session; ask it to install both Drex skills from their GitHub directories:
+Use Codex's [built-in `$skill-installer`](https://learn.chatgpt.com/docs/build-skills) in a Codex session. Ask it to install both Drex skills from their GitHub directories:
 
 ```text
 $skill-installer Install https://github.com/nace-ai/drex-agent-skills/tree/main/skills/drex-for-harness and https://github.com/nace-ai/drex-agent-skills/tree/main/skills/drexify
@@ -95,6 +95,8 @@ ln -s "$HOME/drex-agent-skills/skills/drexify" ~/.cursor/skills/drexify
 ```
 
 For Cursor Cloud Agents, put both skills in the repository's `.cursor/skills/drex-for-harness/` and `.cursor/skills/drexify/`, or enable Cursor's Skills Sync for personal skills.
+
+Cursor.app opened from the Dock does not see `export DREX_API_KEY` from a terminal. macOS starts Dock apps with the login environment. Put the export in `~/.zshrc` or `~/.bashrc`. Cursor's agent terminal reads your shell config when it runs commands.
 
 Restart Cursor after installation to load Drex. Configure `DREX_API_KEY` in the cloud agent's environment if using Cursor Cloud Agents.
 
