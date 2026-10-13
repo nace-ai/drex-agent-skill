@@ -23,7 +23,7 @@ HEADLINE = re.compile((
 ).replace(" ", r"\s+"))
 CONTINUATION = re.compile(r"^\s+(?![-*+]\s|\d+[.)]\s|#|```|~~~)\S")
 SITE = re.compile(r"^\s*[-*]\s+(?P<name>.+?)\s+\(`(?P<ptr>[^`]+)`\):\s*(?P<rest>.*)$")
-CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
+CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
 POINTER_EXT = CODE_EXT | {".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql", ".sh", ".html", ".css", ".ini", ".cfg", ".txt",
                           ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".vue", ".svelte", ".ipynb"}
 POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<line>\d+)(?P<tail>(?:[-,:]\d+)*)`")
@@ -33,6 +33,8 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dis
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils"}
 FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
+MIGRATION_DIRS = {"alembic", "migrations", "flyway"}
+SOURCE_TEST_ROOTS = {"test", "androidTest", "integrationTest", "testFixtures"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
 STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
@@ -63,7 +65,7 @@ FUNC_START = re.compile(
     r"|fn\s+(?P<rs>\w+)"
     r"|fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(?P<kt>\w+)"
     r"|(?:const|let|var)\s+(?P<arrow>\w+)\s*(?::[^=]+)?=\s*(?:async\s+)?"
-    r"(?:function\b|(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)[^=]*=>|(?:<[^>]*>)?\s*\(\s*$|\w+\s*=>)"
+    r"(?:function\b|(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)[^=]*=>|\w+\s*=>)"
     r"|(?:(?:get|set)\s+)?(?:\*\s*)?(?:" + TYPE_TOKEN + r")?(?P<method>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*"
     r"\((?:[^()]|\([^()]*\))*\)\s*(?::\s*[^{=;]+)?(?:throws\s+[\w., ]+)?\s*\{\s*$"
     r"|(?:(?:public|private|protected|static|async|override|internal)\s+)+(?:" + TYPE_TOKEN + r")?"
@@ -71,6 +73,9 @@ FUNC_START = re.compile(
     r")")
 OPEN_SIGNATURE = re.compile(r"^\s*" + MODIFIERS + r"(?:\*\s*)?(?P<name>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$")
 SIGNATURE_CLOSE = re.compile(r"^\s*\)\s*(?::\s*[^{=;]+)?\s*\{\s*$")
+ARROW_OPEN = re.compile(
+    r"^\s*" + MODIFIERS + r"(?:const|let|var)\s+(?P<name>\w+)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:<[^>]*>\s*)?\(\s*$")
+ARROW_CLOSE = re.compile(r"^\s*\)\s*(?::\s*[^{=;\n]+)?\s*=>")
 CALL_NAME = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
 CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
@@ -158,8 +163,59 @@ def git_state(repo):
         return None, None
 
 
+TEST_FILE = re.compile(
+    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs|mts|cts)|_spec\.rb|"
+    r"(?:Test|Tests|IT)\.java|Tests?\.kt|Tests?\.cs|Test\.php|(?:Spec|Test)\.scala|Tests\.swift)$")
+_EXEMPT_TEST_STEMS = ("ab_test", "split_test", "load_test", "stress_test", "smoke_test")
+_TEST_DIR_NAMES = {name.lower() for name in TEST_DIRS}
+
+
+def _production_experiment_name(name):
+    """Production modules whose stem ends in ab_test, split_test, load_test, stress_test, or smoke_test."""
+    stem = Path(name).stem
+    for suffix in _EXEMPT_TEST_STEMS:
+        if stem == suffix or stem.endswith("_" + suffix):
+            return True
+    return False
+
+
 def is_test_name(name):
-    return name.startswith("test_") or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None
+    if name == "tests.py" or name.startswith("test_"):
+        return True
+    if _production_experiment_name(name):
+        return False
+    return TEST_FILE.search(name) is not None
+
+
+def is_test_dir(name):
+    return name.lower() in _TEST_DIR_NAMES
+
+
+def under_source_test_root(dirs):
+    for index in range(len(dirs) - 1):
+        if dirs[index] != "src":
+            continue
+        name = dirs[index + 1]
+        if name in SOURCE_TEST_ROOTS or name.endswith("Test"):
+            return True
+    return False
+
+
+def is_migration(parts):
+    """Skip Alembic, Flyway, EF, Rails, Prisma, and TypeORM migration trees.
+
+    `migrations` matches any case. A singular `migration` directory counts only under
+    `db` (Flyway) or `src` (TypeORM). `db/migrate` stays the Rails layout."""
+    dirs = parts[:-1]
+    for index, part in enumerate(dirs):
+        if part.lower() in MIGRATION_DIRS:
+            return True
+        parent = dirs[index - 1] if index else ""
+        if part == "migrate" and parent == "db":
+            return True
+        if part == "migration" and parent in ("db", "src"):
+            return True
+    return False
 
 
 def scannable(rel, include_tests):
@@ -169,12 +225,14 @@ def scannable(rel, include_tests):
         return False
     if any(p in SKIP_DIRS or p.startswith(".") for p in parts[:-1]):
         return False
+    if is_migration(parts):
+        return False
     if include_tests:
         return True
     dirs = parts[:-1]
-    if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs):
+    if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs) or under_source_test_root(dirs):
         return False
-    last_test = max((i for i, p in enumerate(dirs) if p in TEST_DIRS), default=-1)
+    last_test = max((i for i, p in enumerate(dirs) if is_test_dir(p)), default=-1)
     return last_test < 0 or any(p in EVAL_DIRS for p in dirs[last_test + 1:])
 
 
@@ -241,15 +299,225 @@ def signature_closes(lines, number):
     return False
 
 
+_REGEX_PREV = set("([{:;,=!?&|~^%<>+-*")
+_REGEX_WORDS = {"return", "throw", "case", "else", "do", "void", "typeof", "delete", "in", "of",
+                "instanceof", "await", "yield", "new", "extends"}
+
+
+def mask_templates(lines):
+    """Blank template literals and block comments so a prompt cannot look like code.
+
+    Backticks inside a regex, a quote, or a comment do not open a template. Java and
+    Kotlin text blocks and Python triple quotes are masked too. An opener that never
+    closes is ignored and the file is masked again, so one bad guess cannot hide the rest."""
+    ignored = set()
+    while True:
+        out, unclosed = _mask_lines(lines, ignored)
+        if unclosed is None or unclosed in ignored:
+            return out
+        ignored.add(unclosed)
+
+
+def _slash_can_open_regex(prev, word):
+    return word in _REGEX_WORDS or prev is None or prev in _REGEX_PREV
+
+
+def _mask_lines(lines, ignored):
+    out = []
+    mode, depth, opener, regex_class = None, 0, None, False
+    for row, line in enumerate(lines):
+        buf, i, n = [], 0, len(line)
+        prev, word = None, ""
+        while i < n:
+            if mode == "/*":
+                if line.startswith("*/", i):
+                    mode = None
+                    buf.append("  ")
+                    i += 2
+                    prev, word = "/", ""
+                else:
+                    buf.append(" ")
+                    i += 1
+                continue
+            if mode == "`" and depth == 0:
+                if line[i] == "\\" and i + 1 < n:
+                    buf.append("  ")
+                    i += 2
+                    continue
+                if line.startswith("${", i):
+                    depth = 1
+                    buf.append("  ")
+                    i += 2
+                    continue
+                if line[i] == "`":
+                    mode, opener = None, None
+                buf.append(" ")
+                i += 1
+                continue
+            if mode == "`":
+                if line[i] == "{":
+                    depth += 1
+                elif line[i] == "}":
+                    depth -= 1
+                buf.append(line[i] if depth else " ")
+                i += 1
+                continue
+            if mode in ('"""', "'''"):
+                if line.startswith(mode, i):
+                    mode, opener = None, None
+                    buf.append("   ")
+                    i += 3
+                else:
+                    buf.append(" ")
+                    i += 1
+                continue
+            if mode == "regex":
+                ch = line[i]
+                if ch == "\\" and i + 1 < n:
+                    nxt = line[i + 1]
+                    buf.append("\\" + (" " if nxt == "`" else nxt))
+                    i += 2
+                    continue
+                if ch == "[" and not regex_class:
+                    regex_class = True
+                elif ch == "]" and regex_class:
+                    regex_class = False
+                elif ch == "/" and not regex_class:
+                    mode, prev, word = None, "/", ""
+                buf.append(" " if ch == "`" else ch)
+                i += 1
+                continue
+            if (line.startswith('"""', i) or line.startswith("'''", i)) and (row, i) not in ignored:
+                mode, opener = line[i:i + 3], (row, i)
+                buf.append("   ")
+                i += 3
+                prev, word = None, ""
+                continue
+            if line[i] in "'\"":
+                quote = line[i]
+                buf.append(" ")
+                i += 1
+                while i < n:
+                    if line[i] == "\\" and i + 1 < n:
+                        buf.append("  ")
+                        i += 2
+                        continue
+                    if line[i] == quote:
+                        buf.append(" ")
+                        i += 1
+                        break
+                    buf.append(" ")
+                    i += 1
+                prev, word = quote, ""
+                continue
+            if line.startswith("//", i):
+                buf.append(" " * (n - i))
+                break
+            if line.startswith("/*", i):
+                mode = "/*"
+                buf.append("  ")
+                i += 2
+                prev, word = None, ""
+                continue
+            if line[i] == "`":
+                if (row, i) not in ignored:
+                    mode, depth, opener = "`", 0, (row, i)
+                buf.append(" ")
+                i += 1
+                continue
+            if line[i] == "/" and _slash_can_open_regex(prev, word):
+                mode, regex_class = "regex", False
+                buf.append("/")
+                i += 1
+                prev, word = None, ""
+                continue
+            ch = line[i]
+            buf.append(ch)
+            i += 1
+            if ch in " \t":
+                continue
+            if ch.isalnum() or ch == "_":
+                word += ch
+                prev = ch
+            else:
+                word, prev = "", ch
+        if mode == "regex":
+            mode, regex_class = None, False
+        out.append("".join(buf))
+    if mode in ("`", '"""', "'''") and opener is not None:
+        return out, opener
+    return out, None
+
+
+def arrow_closes(lines, number):
+    for line in lines[number:number + 15]:
+        if ARROW_CLOSE.search(line):
+            return True
+        if line.rstrip().endswith((";", "{")) or (line.strip().startswith(")") and "=>" not in line):
+            return False
+    return False
+
+
+def template_end(lines, row, col):
+    """1-based line where the template that opens at lines[row][col] closes."""
+    depth, i, r = 0, col + 1, row
+    while r < len(lines) and r - row <= 400:
+        line = lines[r]
+        while i < len(line):
+            if line[i] == "\\" and i + 1 < len(line):
+                i += 2
+                continue
+            if depth == 0 and line[i] == "`":
+                return r + 1
+            if depth == 0 and line.startswith("${", i):
+                depth = 1
+                i += 2
+                continue
+            if depth:
+                if line[i] == "{":
+                    depth += 1
+                elif line[i] == "}":
+                    depth -= 1
+            i += 1
+        r += 1
+        i = 0
+    return None
+
+
+def arrow_template_end(lines, start):
+    """End line of a const arrow whose body is one template, else None."""
+    head = lines[start - 1]
+    if not re.search(r"\b(?:const|let|var)\s+\w+", head):
+        return None
+    mark = re.search(r"=>\s*`", head)
+    if mark:
+        return template_end(lines, start - 1, mark.end() - 1)
+    if not ARROW_OPEN.match(head):
+        return None
+    for offset, line in enumerate(lines[start:start + 15], 1):
+        mark = re.search(r"^\s*\)\s*(?::\s*[^{=;\n]+)?\s*=>\s*`", line)
+        if mark:
+            return template_end(lines, start - 1 + offset, mark.end() - 1)
+        if ARROW_CLOSE.search(line) or line.rstrip().endswith((";", "{")) or (
+                line.strip().startswith(")") and "=>" not in line):
+            return None
+    return None
+
+
 def generic_starts(lines):
+    visible = mask_templates(lines)
     starts = []
-    for number, line in enumerate(lines, 1):
+    for number, line in enumerate(visible, 1):
         match = FUNC_START.match(line)
         if match:
             name = next(v for v in match.groupdict().values() if v)
         else:
             opened = OPEN_SIGNATURE.match(line)
-            name = opened.group("name") if opened and signature_closes(lines, number) else None
+            if opened and signature_closes(visible, number):
+                name = opened.group("name")
+            else:
+                arrow = ARROW_OPEN.match(line)
+                name = arrow.group("name") if arrow and arrow_closes(visible, number) else None
         if name and name not in NOT_FUNCTIONS:
             starts.append((number, name))
     return starts
@@ -259,14 +527,21 @@ def generic_spans(lines):
     """Function spans for brace languages by brace depth. Without braces, a span runs to the next start.
 
     Braces inside a parameter type are not the body. The body starts at the first `{` that is
-    outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function."""
+    outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function.
+    An arrow that returns a template ends when that template ends."""
+    visible = mask_templates(lines)
     starts = generic_starts(lines)
     spans = []
     for index, (line, name) in enumerate(starts):
+        templated = arrow_template_end(lines, line)
+        if templated:
+            body = "\n".join(lines[line - 1:templated])
+            spans.append((line, templated, name, set(CALL_NAME.findall(STRING_OR_COMMENT.sub(" ", body))) - NOT_FUNCTIONS))
+            continue
         limit = starts[index + 1][0] - 1 if index + 1 < len(starts) else len(lines)
         depth, opened, end, paren = 0, False, None, 0
         for i in range(line - 1, len(lines)):
-            code = STRING_OR_COMMENT.sub("", lines[i])
+            code = STRING_OR_COMMENT.sub("", visible[i])
             if not opened:
                 brace_at = None
                 for ch_i, ch in enumerate(code):
@@ -293,14 +568,23 @@ def generic_spans(lines):
     return spans
 
 
+def split_lines(text):
+    """Lines the way git, editors, and ast count them: only \\n, after \\r\\n and \\r fold into \\n."""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def file_spans(rel, text):
     """(spans, parsed) where parsed is False when a Python file fell back to the generic finder."""
     if rel.endswith(".py"):
         spans = python_spans(text)
         if spans is not None:
             return spans, True
-        return generic_spans(text.splitlines()), False
-    return generic_spans(text.splitlines()), True
+        return generic_spans(split_lines(text)), False
+    return generic_spans(split_lines(text)), True
 
 
 def owner_of(spans, number):
@@ -344,6 +628,25 @@ def file_constants(lines, found, spans):
     return constants
 
 
+SIGNAL_OF = dict(SIGNALS)
+
+
+def kinds_beyond_name(line, qualified, kinds):
+    """Drop a hit that is only the function's own name on its declaration line."""
+    name = short(qualified)
+    named = [match.span() for match in re.finditer(r"\b" + re.escape(name) + r"\b", line)]
+    kept = []
+    for kind in kinds:
+        pattern = SIGNAL_OF.get(kind)
+        if pattern is None:
+            kept.append(kind)
+            continue
+        matches = list(pattern.finditer(line))
+        if not matches or any(not any(a <= match.start() and match.end() <= b for a, b in named) for match in matches):
+            kept.append(kind)
+    return kept
+
+
 def by_function(spans, found, lines):
     """{(line, qualified name): kinds} for hit lines inside a function, plus two kinds of inheritance.
 
@@ -353,7 +656,11 @@ def by_function(spans, found, lines):
     grouped = {}
     for number, kinds in found:
         owner = owner_of(spans, number)
-        if owner:
+        if not owner:
+            continue
+        if number == owner[0]:
+            kinds = kinds_beyond_name(lines[number - 1], owner[2], kinds)
+        if kinds:
             grouped.setdefault((owner[0], owner[2]), set()).update(kinds)
     constants = file_constants(lines, found, spans)
     if constants:
@@ -521,7 +828,7 @@ def java_word_guard_hits(lines):
 
 
 def line_hits(text, wrappers=None):
-    lines = text.splitlines()
+    lines = split_lines(text)
     phrase_hits = phrase_loop_hits(lines)
     judge_hits = judge_model_hits(lines)
     structured_hits = structured_output_hits(lines)
@@ -576,15 +883,54 @@ def wrapper_names(spans, found, lines):
     return names
 
 
-def read_scannable(repo, rels):
+def inside_repo(repo, path):
+    if not path.is_symlink():
+        return True
+    try:
+        path.resolve().relative_to(repo.resolve())
+        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def guarded_text(repo, rel):
+    """Text of a regular file inside the repo, or None when it must not be read."""
+    root = Path(repo).resolve()
+    path = Path(repo) / rel
+    try:
+        if not inside_repo(root, path) or not path.is_file() or path.stat().st_size > MAX_BYTES:
+            return None
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def prefer_real_paths(repo, rels):
+    """One path per resolved file. A real path wins over a symlink to the same file."""
+    groups, order = {}, []
     for rel in rels:
         path = repo / rel
         try:
-            if path.stat().st_size > MAX_BYTES:
-                continue
-            yield rel, path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
+            key = path.resolve().as_posix()
+        except (OSError, RuntimeError):
+            key = "unresolved:" + rel
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append((rel, path))
+    kept = []
+    for key in order:
+        plain = [rel for rel, path in groups[key] if not path.is_symlink()]
+        pool = plain or [rel for rel, _path in groups[key]]
+        kept.append(sorted(pool)[0])
+    return kept
+
+
+def read_scannable(repo, rels):
+    for rel in rels:
+        text = guarded_text(repo, rel)
+        if text is not None:
+            yield rel, text
 
 
 def suggested_groups(functions):
@@ -599,7 +945,7 @@ def scan(repo, include_tests=False, groups=None):
     wrapper and is defined once, so a decision behind two in-house layers is still listed."""
     repo = Path(repo)
     listed = list_files(repo)
-    rels = [rel for rel in listed if scannable(rel, include_tests)]
+    rels = prefer_real_paths(repo, [rel for rel in listed if scannable(rel, include_tests)])
     hits, texts, spans, wrappers, scanned, fallbacks = {}, {}, {}, set(), 0, 0
 
     def remember(rel, text, found):
@@ -618,7 +964,7 @@ def scan(repo, include_tests=False, groups=None):
         found = line_hits(text)
         if keep_file(found):
             remember(rel, text, normalize_found(found))
-            wrappers |= wrapper_names(spans[rel], found, text.splitlines())
+            wrappers |= wrapper_names(spans[rel], found, split_lines(text))
     if wrappers:
         indexed = [(rel, set(DEF_NAME.findall(text)), set(LONG_CALL.findall(text)))
                    for rel, text in read_scannable(repo, rels)]
@@ -661,7 +1007,7 @@ def scan(repo, include_tests=False, groups=None):
     for rel, found in sorted(hits.items()):
         entry = by_area.setdefault(areas[rel], {"files": [], "hits": 0, "functions": 0})
         kinds = sorted({k for _, ks in found for k in ks})
-        functions = candidate_functions(spans.pop(rel), found, texts.pop(rel).splitlines())
+        functions = candidate_functions(spans.pop(rel), found, split_lines(texts.pop(rel)))
         entry["files"].append({"path": rel, "kinds": kinds, "functions": functions,
                                "lines": [n for n, _ in found[:MAX_LINES_PER_FILE]], "hits": len(found)})
         entry["hits"] += len(found)
@@ -726,6 +1072,8 @@ def load_map(path, repo, include_tests):
         raise SystemExit(f"cannot read map {path}: {error.strerror}. Run scan --save first.")
     except ValueError:
         raise SystemExit(f"{path} is not a valid map. Run scan --save again.")
+    if not isinstance(result, dict):
+        raise SystemExit(f"{path} is not a valid map. Run scan --save again.")
     if result.get("schema") != SCHEMA:
         raise SystemExit(f"{path} was written by another version of this script. Run scan --save again.")
     if include_tests and not result["include_tests"]:
@@ -781,34 +1129,58 @@ def print_scan(result, area=None, group=0):
 def line_counts(repo, files, cache):
     def count(rel):
         if rel not in cache:
-            try:
-                cache[rel] = len((repo / rel).read_text(encoding="utf-8", errors="ignore").splitlines())
-            except OSError:
-                cache[rel] = 0
+            text = guarded_text(repo, rel)
+            cache[rel] = None if text is None else len(split_lines(text))
         return cache[rel]
     return count
+
+
+def strip_dot_slash(text):
+    """Remove a leading ./ prefix, repeatedly. Do not strip other dots or slashes."""
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def bounded_line(line, total, rel):
+    if total is None:
+        return None, f"cannot read {rel}"
+    if not 1 <= line <= total:
+        return None, f"line {line} is past the end of {rel}"
+    return rel, None
 
 
 def resolve(raw, line, files, by_suffix, count):
     """Return (full_path or None, problem or None)."""
     if raw in files:
-        return (raw, None) if 1 <= line <= count(raw) else (None, f"line {line} is past the end of {raw}")
+        return bounded_line(line, count(raw), raw)
     if "{" in raw or "}" in raw:
         return None, "brace groups cannot be checked, write each path in full"
-    tail = raw.split(".../")[-1].split("…/")[-1].lstrip("./")
+    tail = strip_dot_slash(raw.split(".../")[-1].split("…/")[-1])
     matches = sorted(f for f in by_suffix.get(Path(tail).name, ()) if f == tail or f.endswith("/" + tail))
     if not matches:
         return None, "no such file"
     if len(matches) > 1:
         return None, f"ambiguous, matches {len(matches)} files: {', '.join(matches[:3])}"
-    if not 1 <= line <= count(matches[0]):
-        return None, f"line {line} is past the end of {matches[0]}"
-    return matches[0], None
+    return bounded_line(line, count(matches[0]), matches[0])
 
 
 UNCOUNTED = re.compile(r"^(?:not counted|plan|implementation plan)\b")
 FENCE = re.compile(r"^\s*(```|~~~)")
 PIN = re.compile(r"^(?P<path>.+?):(?P<line>\d+)")
+COVERAGE_MENTION = re.compile(r"candidate\s+functions?", re.I)
+COUNT = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
+COVERAGE_FULL = re.compile(
+    r"Checked\s+(?P<checked>" + COUNT + r")\s+of\s+(?P<total>" + COUNT + r")\s+candidate\s+functions?\s*:\s*"
+    r"(?P<sites>" + COUNT + r")\s+sites?\s*,\s*"
+    r"(?P<callers>" + COUNT + r")\s+callers,\s*wrappers,\s*or\s+backends\s*,\s*"
+    r"(?P<other>" + COUNT + r")\s+not\s+decisions?\s*,\s*"
+    r"(?P<dead>" + COUNT + r")\s+dead\b"
+    r".{0,800}?"
+    r"(?P<more>" + COUNT + r")\s+more\s+sites?\b"
+    r".{0,800}?"
+    r"(?P<lines>" + COUNT + r")\s+site\s+lines?\s+in\s+total",
+    re.I | re.S)
 
 
 def heading_level(heading):
@@ -838,11 +1210,10 @@ def site_start(repo, rel, line, cache):
     if Path(rel).suffix not in CODE_EXT:
         return line, None
     if rel not in cache:
-        try:
-            text = (repo / rel).read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            text = ""
-        cache[rel] = (*file_spans(rel, text), text.splitlines())
+        text = guarded_text(repo, rel)
+        cache[rel] = None if text is None else (*file_spans(rel, text), split_lines(text))
+    if cache[rel] is None:
+        return line, f"cannot read {rel}"
     spans, parsed, lines = cache[rel]
     def preamble(i):
         text = lines[i].strip()
@@ -861,10 +1232,84 @@ def site_start(repo, rel, line, cache):
     return line, None
 
 
+def coverage_text(lines, last_site, fenced_lines):
+    """The paragraph right after the site list. Fences, headings, and later bullets are not part of it."""
+    index = 0 if last_site is None else last_site + 1
+    limit = len(lines)
+    while index < limit and (index in fenced_lines or FENCE.match(lines[index]) or not lines[index].strip()):
+        index += 1
+    chunk = []
+    while index < limit:
+        if index in fenced_lines or FENCE.match(lines[index]):
+            index += 1
+            continue
+        line = lines[index]
+        if not line.strip() or HEADING.match(line) or re.match(r"\s*(?:[-*+]|\d+[.)])\s", line):
+            break
+        chunk.append(line)
+        index += 1
+    return "\n".join(chunk)
+
+
+def coverage_review(lines, last_site, fenced_lines, listed):
+    """Problems and warnings for the coverage line after the counted site list."""
+    text = coverage_text(lines, last_site, fenced_lines)
+    problems, warnings = [], []
+    if not COVERAGE_MENTION.search(text):
+        problems.append("no coverage line after the site list. Say how many candidate functions were checked")
+        return problems, warnings
+
+    def number(value):
+        return int(value.replace(",", ""))
+
+    for match in COVERAGE_FULL.finditer(text):
+        checked, total = number(match.group("checked")), number(match.group("total"))
+        sites, callers = number(match.group("sites")), number(match.group("callers"))
+        other, dead = number(match.group("other")), number(match.group("dead"))
+        more, site_lines = number(match.group("more")), number(match.group("lines"))
+        buckets = sites + callers + other + dead
+        claimed = sites + more
+        if buckets != checked:
+            problems.append(f"coverage buckets sum to {buckets}, not the {checked} candidate functions checked")
+        if checked > total:
+            problems.append(f"coverage checked {checked} candidate functions, more than the {total} in total. "
+                            f"Lower the checked count or raise the total")
+        elif checked < total:
+            warnings.append(f"coverage checked {checked} of {total} candidate functions")
+        if site_lines != listed:
+            problems.append(f"coverage says {site_lines} site lines in total, the list has {listed}. "
+                            f"Set the total to {listed}")
+        if claimed < site_lines:
+            problems.append(f"coverage has {sites} sites plus {more} more sites ({claimed}), "
+                            f"less than {site_lines} site lines in total. "
+                            f"Duplicates can be removed, not added")
+    return problems, warnings
+
+
+def read_report(report_path):
+    """Report text. UTF-16 with a BOM is accepted. Any other undecodable file is an error."""
+    if str(report_path) == "-":
+        return sys.stdin.read()
+    path = Path(report_path)
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        raise SystemExit(f"cannot read report {report_path}: {error.strerror or error}")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError as error:
+            raise SystemExit(f"cannot read report {report_path}: {error}")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise SystemExit(f"cannot read report {report_path}: {error}")
+
+
 def check(report_path, repo, fix=False):
     repo = Path(repo)
     from_stdin = str(report_path) == "-"
-    text = sys.stdin.read() if from_stdin else Path(report_path).read_text(encoding="utf-8")
+    text = read_report(report_path)
     writable = fix and not from_stdin
     files = set(list_files(repo))
     by_suffix = {}
@@ -886,10 +1331,11 @@ def check(report_path, repo, fix=False):
             return f"`{full}:{line}{match.group('tail')}`"
         return match.group(0)
 
-    lines = POINTER.sub(repl, text).split("\n")
+    lines = split_lines(POINTER.sub(repl, text))
     tally = {s: 0 for s in STATUSES}
-    seen, spans_cache = {}, {}
+    seen, spans_cache, fenced_lines = {}, {}, set()
     sites = 0
+    last_site = None
     uncounted_level = None
     fenced = False
     found_headline = HEADLINE.search("\n".join(lines))
@@ -900,6 +1346,7 @@ def check(report_path, repo, fix=False):
             fenced = not fenced
             continue
         if fenced:
+            fenced_lines.add(index)
             continue
         heading = HEADING.match(line)
         if heading and index < headline_at:
@@ -923,6 +1370,7 @@ def check(report_path, repo, fix=False):
             problems.append(f"line {number}: status must start with one of: {', '.join(STATUSES)}")
             continue
         sites += 1
+        last_site = block[-1]
         tally[status] += 1
         ptr = site.group("ptr")
         if not SITE_POINTER.match(ptr):
@@ -949,6 +1397,8 @@ def check(report_path, repo, fix=False):
         seen.setdefault(ptr, number)
 
     new_text = "\n".join(lines)
+    if text.endswith("\n") or text.endswith("\r"):
+        new_text += "\n"
     if writable and new_text != text:
         Path(report_path).write_text(new_text, encoding="utf-8")
     if not writable and fixed:
@@ -968,7 +1418,10 @@ def check(report_path, repo, fix=False):
         for status in STATUSES:
             if claimed[status] != tally[status]:
                 problems.append(f"headline says {claimed[status]} {status}, the list has {tally[status]}")
-    return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if writable else [], "problems": problems}
+    extra, warnings = coverage_review(lines, last_site, fenced_lines, sites)
+    problems.extend(extra)
+    return {"sites": sites, "statuses": tally, "pointers_fixed": fixed if writable else [],
+            "warnings": warnings, "problems": problems}
 
 
 def main(argv=None):
@@ -1014,6 +1467,8 @@ def main(argv=None):
         print(f"{result['sites']} sites ({counts})")
         for f in result["pointers_fixed"]:
             print(f"fixed: {f}")
+        for w in result["warnings"]:
+            print(f"warning: {w}")
         for p in result["problems"]:
             print(f"problem: {p}")
         print("ok" if not result["problems"] else f"{len(result['problems'])} problems")

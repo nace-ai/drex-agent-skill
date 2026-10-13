@@ -76,14 +76,16 @@ class RecallEvalTests(unittest.TestCase):
         self.assertEqual(repo["found"], 1)
         self.assertEqual(repo["known"], 2)
         self.assertEqual(repo["missing"], [
-            {"path": "decide.py", "line": 4, "function": "load_rows"},
+            {"path": "decide.py", "line": 4, "function": "load_rows", "file_flagged": True},
         ])
+        self.assertEqual(repo["found_in_files"], 2)
         self.assertEqual(repo["candidate_functions"], 1)
 
         strict = self.run_recall("--strict")
         self.assertEqual(strict.returncode, 1, strict.stderr)
         self.assertIn("1 of 2", strict.stdout)
-        self.assertIn("decide.py:4 load_rows", strict.stdout)
+        self.assertIn("decide.py:4 load_rows (file flagged)", strict.stdout)
+        self.assertIn("2 of 2", strict.stdout)
 
 
 if __name__ == "__main__":
