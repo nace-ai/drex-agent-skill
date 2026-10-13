@@ -307,9 +307,9 @@ _REGEX_WORDS = {"return", "throw", "case", "else", "do", "void", "typeof", "dele
 def mask_templates(lines):
     """Blank template literals and block comments so a prompt cannot look like code.
 
-    Backticks inside a regex, a quote, or a comment do not open a template. A backtick
-    that never closes is not a template: the file is masked again without it, so one bad
-    guess cannot hide the rest of the file."""
+    Backticks inside a regex, a quote, or a comment do not open a template. Java and
+    Kotlin text blocks and Python triple quotes are masked too. An opener that never
+    closes is ignored and the file is masked again, so one bad guess cannot hide the rest."""
     ignored = set()
     while True:
         out, unclosed = _mask_lines(lines, ignored)
@@ -362,6 +362,15 @@ def _mask_lines(lines, ignored):
                 buf.append(line[i] if depth else " ")
                 i += 1
                 continue
+            if mode in ('"""', "'''"):
+                if line.startswith(mode, i):
+                    mode, opener = None, None
+                    buf.append("   ")
+                    i += 3
+                else:
+                    buf.append(" ")
+                    i += 1
+                continue
             if mode == "regex":
                 ch = line[i]
                 if ch == "\\" and i + 1 < n:
@@ -377,6 +386,12 @@ def _mask_lines(lines, ignored):
                     mode, prev, word = None, "/", ""
                 buf.append(" " if ch == "`" else ch)
                 i += 1
+                continue
+            if (line.startswith('"""', i) or line.startswith("'''", i)) and (row, i) not in ignored:
+                mode, opener = line[i:i + 3], (row, i)
+                buf.append("   ")
+                i += 3
+                prev, word = None, ""
                 continue
             if line[i] in "'\"":
                 quote = line[i]
@@ -429,7 +444,7 @@ def _mask_lines(lines, ignored):
         if mode == "regex":
             mode, regex_class = None, False
         out.append("".join(buf))
-    if mode == "`" and opener is not None:
+    if mode in ("`", '"""', "'''") and opener is not None:
         return out, opener
     return out, None
 

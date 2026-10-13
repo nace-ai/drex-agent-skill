@@ -1169,6 +1169,39 @@ class DrexifyScriptTests(unittest.TestCase):
         ]
         self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
 
+    def test_text_blocks_do_not_create_functions(self):
+        java = [
+            "void classifyDoc(String t) {",
+            '    String prompt = """',
+            "    function hidden() { return 1; }",
+            '    """;',
+            "    client.chat.completions.create(t);",
+            "}",
+        ]
+        names = [name for _, name in drexify.generic_starts(java)]
+        self.assertIn("classifyDoc", names)
+        self.assertNotIn("hidden", names)
+        spans = {name: (start, end) for start, end, name, _calls in drexify.generic_spans(java)}
+        self.assertEqual(spans["classifyDoc"], (1, 6))
+        python_lines = [
+            "x = '''",
+            "def hidden():",
+            "    return 1",
+            "'''",
+            "def classify_doc(t):",
+            "    return client.chat.completions.create(t)",
+        ]
+        python_names = [name for _, name in drexify.generic_starts(python_lines)]
+        self.assertNotIn("hidden", python_names)
+        self.assertIn("classify_doc", python_names)
+        unclosed = [
+            'String prompt = """',
+            "void classifyDoc(String t) {",
+            "    client.chat.completions.create(t);",
+            "}",
+        ]
+        self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
+
     def test_resolve_keeps_a_leading_dot_directory(self):
         rel = ".github/workflows/x.py"
         path = self.repo / rel
