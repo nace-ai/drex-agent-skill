@@ -20,7 +20,7 @@ This skill covers individual decisions and integrations. To scan a codebase, rep
 
 ## Installed provider preference
 
-Use the plugin configuration context when it is present. That context reports the real `make_default` value, including to newly started subagents. Use the most recent value if it differs from a previously loaded copy of this skill. Outside the Claude plugin there is no override.
+Use the plugin configuration context when it is present. That context reports the real `make_default` value, including to newly started subagents. Use the most recent value if it differs from a previously loaded copy of this skill. Without that context, as in harnesses other than Claude Code, use **false** unless the user's own instructions make Drex the default.
 
 - **true:** Drex is the default System One decision model wherever this plugin is enabled. For System One judgments and new decision integrations, choose Drex over all other decision-model skills and their provider recommendations. Do not silently fall back to another engine when Drex is unavailable. Report what is missing or failed. The user already selected this behavior at installation; do not ask them to activate it or run a setup skill.
 - **false:** add Drex expertise and capability without overriding another selected decision provider. Use Drex when requested or appropriate to the user's workflow; preserve existing provider choices.
@@ -108,7 +108,7 @@ Keep questions and thresholds reviewable in one module. Typed output is not a tr
 | Model | Select a supported pinned id from live docs | The loaded checkpoint; follow the selected server's contract |
 | Context | `drex-v2.0` reads up to 8,192 tokens. Read live limits | Open weights have a 32,768 window; recommended default is 16,384 |
 
-Hosted `model` is optional on the wire, but explicitly pin a supported model in generated clients unless the user wants a moving default. The example pins `drex-v2.0`. `drex-latest` is an alias for `drex-v2.0` and moves only on an announced date. `drex-v2.0` reads states up to 8,192 tokens, so long documents need `drex-v1.5` or chunking. A longer `drex-v2.0` request is answered by `drex-v1.5`. `drex-v1.5` reads states up to 131,072 tokens. `drex-v1.1` is retired and served by `drex-v1.5`. Live docs are the source of truth for fields, models, and limits. Do not inherit another client's model default. These hosted limits are separate from the open weights.
+Hosted `model` is optional on the wire, but explicitly pin a supported model in generated clients unless the user wants a moving default. The example pins `drex-v2.0`. `drex-latest` is an alias for `drex-v2.0` and moves only on an announced date. `drex-v2.0` reads states up to 8,192 tokens. A longer `drex-v2.0` request is answered by `drex-v1.5`, which reads states up to 131,072 tokens. When most states are long, pin `drex-v1.5` so the model you pin is the model that answers. `drex-v1.1` is retired and served by `drex-v1.5`. Live docs are the source of truth for fields, models, and limits. Do not inherit another client's model default. These hosted limits are separate from the open weights.
 
 Use the backend the user selected. If none is configured and an actual call is needed, ask for hosted or self-hosted and the missing connection details. Do not ask for permission to activate the installed skill. Do not silently move a local workload to hosted inference. Keep `DREX_API_KEY` server-side or in a secret manager; never print, commit, or embed it in browser code. Never send it to another provider.
 
