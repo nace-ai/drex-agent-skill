@@ -30,11 +30,13 @@ POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<l
 SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
-TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "__mocks__"}
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils"}
+FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample"}
+EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 SCHEMA = 2
 DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
-STRONG = DIRECT | {"model-import", "wrapper-call"}
-FUNCTION_STRONG = DIRECT | {"wrapper-call"}
+STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
+FUNCTION_STRONG = DIRECT | {"wrapper-call", "task-output", "word-guard"}
 FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "text-rule", "local-call"}
 MODEL_REACH = {"model-call", "wrapper-call", "model-reach"}
 MAX_BYTES = 1_000_000
@@ -46,7 +48,7 @@ PROGRESS_EVERY = 2000
 DECISION_WORDS = (r"classif|categori|route|router|intent|rerank|relevan|judge|grade|verif|match|select|detect|triage|"
                   r"adjudicat|decide|label")
 DECISION_NAME = re.compile(DECISION_WORDS, re.I)
-PREDICATE_NAME = re.compile(r"(?:^|[._])(?:is|should|looks|seems)(?:[A-Z]|_[a-z])")
+PREDICATE_NAME = re.compile(r"(?:^|[._])(?:is|should|looks|seems|can|has)(?:[A-Z]|_[a-z])")
 TEXT_RULE_KINDS = {"text-rule", "label-set"}
 NOT_FUNCTIONS = {"if", "for", "foreach", "while", "switch", "catch", "return", "function", "with", "elif", "else", "do",
                  "try", "new", "using", "lock", "synchronized", "when", "match", "sizeof", "typeof", "await", "throw"}
@@ -74,15 +76,18 @@ LONG_CALL = re.compile(r"\b([A-Za-z]\w{7,})\s*\(")
 CONSTANT_KINDS = {"label-set", "regex", "text-rule"}
 ASSIGNED = re.compile(r"^(?P<indent>\s*)(?:(?:export|const|let|var|final|static|private|public|protected|readonly|pub)\s+)*"
                       r"(?:[A-Za-z_][\w.]*(?:<[^=]*>)?(?:\[\])*\s+)?([A-Za-z_]\w*)\s*(?::[^=]+)?:?=(?!=)")
-DEF_NAME = re.compile(r"\b(?:def|function|func|fn|fun)\s+(\w+)")
+DEF_NAME = re.compile(r"\b(?:(?:def|function|func|fn|fun)\s+|func\s*\([^)]*\)\s*)(\w+)")
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
 SIGNALS = (
     ("drex", re.compile(r"\b(systemone|system_one|drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
     ("model-call", re.compile(
         r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
+        r"\.GenerateContent\s*\(|:generateContent\b|\bGenerateFromSinglePrompt\s*\(|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
-        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(", re.I)),
+        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"
+        r"\b\w*classifier\w*\s*\.\s*(?:decide|classify|predict)\s*\(|"
+        r"new Sentiment\(|sentiment\.analyze\s*\(|SentimentIntensityAnalyzer\(|\bTextBlob\(", re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
     ("model-import", re.compile(
         r"^\s*(?:from|import)\s+(?:openai|anthropic|google\.genai|google\.generativeai|vertexai|litellm|langchain\w*|"
@@ -99,9 +104,24 @@ SIGNALS = (
                              r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\s*(?:===?|\.includes|\.startsWith|\.endsWith)|"
                              r"\bstrings\.ToLower\([^)]*\)\s*(?:==|!=)|\bstrings\.(?:Contains|HasPrefix|HasSuffix)\(strings\.ToLower|"
                              r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(|"
-                             r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(")),
+                             r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(|"
+                             r"\.some\(\s*\(?\w+\)?\s*=>\s*\w+\.test\s*\(")),
 )
+# Own kind, not a model call, so wrapper learning stays unchanged. Case-sensitive: ignore-case
+# would treat `output_json = answer...` as a schema argument.
+TASK_OUTPUT_ARG = re.compile(
+    r"(?<!\.)\b(?:output_pydantic|output_json)\s*=(?!=)\s*(?!None\b|True\b|False\b)[A-Z_]")
+FOR_VAR = re.compile(r"^\s*for\s+([A-Za-z_]\w*)\s+in\s+\S+")
+PHRASE_WINDOW = 6
+TEXTISH = re.compile(r"content|text|message|line|body|answer|prompt|sentence|phrase|comment|query|title|reason|thought|lower", re.I)
+PHRASEISH = re.compile(r"indicator|phrase|keyword|pattern|needle|marker|prefix|token|word", re.I)
+LABEL_GROUP = re.compile(
+    r"""(?<![\w.])(?:\(|\[)\s*['"][A-Za-z_][A-Za-z0-9_]{0,40}['"]"""
+    r"""(?:\s*,\s*['"][A-Za-z_][A-Za-z0-9_]{0,40}['"]){1,12}\s*,?\s*(?:\)|\])""")
+LABEL_SKIP = re.compile(r"\b(?:create_index|Index|Column|ForeignKey|UniqueConstraint)\b")
 WRAPPER_MIN_LEN = 8
+WRAPPER_DEPTH = 3
+CLIENT_NAME = re.compile(r"model|llm|gpt|completion|converse", re.I)
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
                 "request", "response", "get_client", "get_model", "from_config", "validate"}
 
@@ -138,9 +158,8 @@ def git_state(repo):
         return None, None
 
 
-def is_test(parts, name):
-    return (any(p in TEST_DIRS for p in parts[:-1]) or name.startswith("test_")
-            or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None)
+def is_test_name(name):
+    return name.startswith("test_") or re.search(r"(_test\.\w+|\.(test|spec)\.\w+)$", name) is not None
 
 
 def scannable(rel, include_tests):
@@ -150,7 +169,13 @@ def scannable(rel, include_tests):
         return False
     if any(p in SKIP_DIRS or p.startswith(".") for p in parts[:-1]):
         return False
-    return include_tests or not is_test(parts, name)
+    if include_tests:
+        return True
+    dirs = parts[:-1]
+    if is_test_name(name) or any(p in FIXTURE_DIRS for p in dirs):
+        return False
+    last_test = max((i for i, p in enumerate(dirs) if p in TEST_DIRS), default=-1)
+    return last_test < 0 or any(p in EVAL_DIRS for p in dirs[last_test + 1:])
 
 
 def assign_areas(paths):
@@ -231,20 +256,36 @@ def generic_starts(lines):
 
 
 def generic_spans(lines):
-    """Function spans for brace languages by brace depth. Without braces, a span runs to the next start."""
+    """Function spans for brace languages by brace depth. Without braces, a span runs to the next start.
+
+    Braces inside a parameter type are not the body. The body starts at the first `{` that is
+    outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function."""
     starts = generic_starts(lines)
     spans = []
     for index, (line, name) in enumerate(starts):
         limit = starts[index + 1][0] - 1 if index + 1 < len(starts) else len(lines)
-        depth, opened, end = 0, False, None
+        depth, opened, end, paren = 0, False, None, 0
         for i in range(line - 1, len(lines)):
             code = STRING_OR_COMMENT.sub("", lines[i])
+            if not opened:
+                brace_at = None
+                for ch_i, ch in enumerate(code):
+                    if ch == "(":
+                        paren += 1
+                    elif ch == ")":
+                        paren -= 1
+                    elif ch == "{" and paren <= 0:
+                        brace_at = ch_i
+                        break
+                if brace_at is None:
+                    if i - (line - 1) > 40 or i + 1 >= limit:
+                        break
+                    continue
+                code = code[brace_at:]
+                opened = True
             depth += code.count("{") - code.count("}")
-            opened = opened or "{" in code
-            if opened and depth <= 0:
+            if depth <= 0:
                 end = i + 1
-                break
-            if not opened and (i - line > 8 or i + 1 >= limit):
                 break
         end = end or limit
         body = "\n".join(lines[line - 1:end])
@@ -327,22 +368,184 @@ def by_function(spans, found, lines):
     return grouped
 
 
+def normalize_found(found):
+    out = []
+    for number, kinds in found:
+        mapped = []
+        for kind in kinds:
+            kind = "label-set" if kind == "label-arg" else kind
+            if kind not in mapped:
+                mapped.append(kind)
+        out.append((number, mapped))
+    return out
+
+
+HELPER_DECISION = re.compile(DECISION_WORDS + r"|evaluat", re.I)
+CLASS_ROLE = re.compile(r"(?:Evaluator|Ranker|Router|Classifier|Judge)$")
+ENTRY_METHODS = {"run", "run_async", "evaluate", "__call__"}
+CLASS_MODEL_KINDS = {"model-call", "wrapper-call", "model-import", "rerank"}
+
+
+def task_output_helpers(spans, lines):
+    names = set()
+    for start, end, name, _calls in spans:
+        if not HELPER_DECISION.search(name):
+            continue
+        if any(TASK_OUTPUT_ARG.search(line) for line in lines[start - 1:end]):
+            names.add(short(name))
+    return names
+
+
+def class_entry(name, model_classes):
+    """A run or evaluate method on a judge-style class whose sibling methods call a model."""
+    if "." not in name:
+        return False
+    cls, method = name.rsplit(".", 1)
+    return method in ENTRY_METHODS and cls in model_classes and CLASS_ROLE.search(cls) is not None
+
+
 def candidate_functions(spans, found, lines):
     """Functions that look like a decision, in line order."""
+    found = normalize_found(found)
+    helpers = task_output_helpers(spans, lines)
+    calls = {(span[0], span[2]): span[3] for span in spans}
+    grouped = by_function(spans, found, lines)
+    model_classes = {name.rsplit(".", 1)[0] for (_line, name), kinds in grouped.items()
+                     if "." in name and kinds & CLASS_MODEL_KINDS}
+    for start, _end, name, _calls in spans:
+        if (start, name) not in grouped and class_entry(name, model_classes):
+            grouped[(start, name)] = set()
     out = []
-    for (line, name), kinds in sorted(by_function(spans, found, lines).items()):
+    for (line, name), kinds in sorted(grouped.items()):
+        calls_task = bool(calls.get((line, name), ()) & (helpers - {short(name)}))
         if (kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK)
-                or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)):
+                or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)
+                or calls_task or class_entry(name, model_classes)):
             out.append({"name": name, "line": line, "kinds": sorted(kinds - {"model-reach"})})
     return out
 
 
+def phrase_loop_hits(lines):
+    hits = set()
+    pending = []
+    for index, line in enumerate(lines):
+        match = FOR_VAR.match(line)
+        if match:
+            pending.append((index + PHRASE_WINDOW, match.group(1)))
+        pending = [(expiry, var) for expiry, var in pending if index <= expiry]
+        for _expiry, var in pending:
+            member = re.search(rf"\b(?:if|elif)\s+\(?\s*{re.escape(var)}\s+in\s+([A-Za-z_][\w.]*)", line)
+            textual = member and (TEXTISH.search(member.group(1)) or PHRASEISH.search(var))
+            if textual or re.search(rf"\.(?:startswith|endswith|find)\(\s*{re.escape(var)}\b", line):
+                hits.add(index)
+    return hits
+
+
+def label_arg_line(line):
+    """A label group that is a call argument. A line that is only the group counts too."""
+    match = LABEL_GROUP.search(line)
+    if not match or LABEL_SKIP.search(line):
+        return False
+    before = line[:match.start()]
+    if re.search(r"(?i)\bIN\s*$", before):
+        return False
+    return before.strip() == "" or re.search(r"[(,]\s*$", before) is not None
+
+
+JUDGE_KEY = re.compile(r"(?<![\w.'\"`])judge\s*:")
+JUDGE_MODEL = re.compile(r"(?<![\w.])model\s*[,:]")
+STRUCTURED_OUTPUT = re.compile(r"(?<![\w.])structuredOutput\s*:\s*\{")
+AGENT_GENERATE = re.compile(r"\.(?:generate|generateLegacy|stream)\s*\(")
+TRY_GENERATE = re.compile(r"\btryGenerate\w*\s*\(")
+CHAT_PROMPT = re.compile(r"\.prompt\s*\(")
+CHAT_CALL = re.compile(r"\.call\s*\(")
+CHAT_BUILDER = re.compile(r"chatClientBuilder|ChatClient\s*\.\s*builder\s*\(")
+ANY_MATCH = re.compile(r"\.anyMatch\s*\(")
+CONTAINS_CALL = re.compile(r"\.contains\s*\(")
+LOWER_CALL = re.compile(r"\.toLowerCase\s*\(|\.equalsIgnoreCase\s*\(")
+ANCHOR = re.compile(r"(?<![\w.'\"`])judge\s*:|(?<![\w.])structuredOutput\s*:\s*\{")
+
+
+def nearby(lines, index, pattern, before, after):
+    """True when `pattern` hits within `before`/`after` lines, without crossing a function start."""
+    start = index
+    for _ in range(before):
+        if start == 0 or FUNC_START.match(lines[start - 1]):
+            break
+        start -= 1
+    end = index
+    for _ in range(after):
+        if end + 1 >= len(lines) or FUNC_START.match(lines[end + 1]):
+            break
+        end += 1
+    return any(pattern.search(line) for line in lines[start:end + 1])
+
+
+def judge_model_hits(lines):
+    """An object key `judge:` whose next line names a model. A later `model` field is a config payload."""
+    return {index for index, line in enumerate(lines)
+            if JUDGE_KEY.search(line) and nearby(lines, index, JUDGE_MODEL, 0, 1)}
+
+
+def structured_output_hits(lines):
+    """`structuredOutput:` beside an agent generate or stream, or a nearby tryGenerate helper."""
+    hits = set()
+    for index, line in enumerate(lines):
+        if not STRUCTURED_OUTPUT.search(line):
+            continue
+        if nearby(lines, index, AGENT_GENERATE, 8, 0) or nearby(lines, index, TRY_GENERATE, 0, 30):
+            hits.add(index)
+    return hits
+
+
+def fluent_model_hits(lines):
+    """A ChatClient builder chain `.prompt()` ... `.call()`."""
+    hits = set()
+    for index, line in enumerate(lines):
+        if not CHAT_PROMPT.search(line):
+            continue
+        if nearby(lines, index, CHAT_CALL, 0, 6) and nearby(lines, index, CHAT_BUILDER, 1, 0):
+            hits.add(index)
+    return hits
+
+
+def java_word_guard_hits(lines):
+    """`stream().anyMatch` that lowercases and `.contains` a word, the Java form of `.some(p => x.includes(p))`."""
+    hits = set()
+    for index, line in enumerate(lines):
+        if not ANY_MATCH.search(line):
+            continue
+        if nearby(lines, index, CONTAINS_CALL, 0, PHRASE_WINDOW) and nearby(lines, index, LOWER_CALL, 0, PHRASE_WINDOW):
+            hits.add(index)
+    return hits
+
+
 def line_hits(text, wrappers=None):
+    lines = text.splitlines()
+    phrase_hits = phrase_loop_hits(lines)
+    judge_hits = judge_model_hits(lines)
+    structured_hits = structured_output_hits(lines)
+    fluent_hits = fluent_model_hits(lines)
+    guard_hits = java_word_guard_hits(lines)
     found = []
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(lines, 1):
         kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
         if wrappers is not None and wrappers.search(line) and not FUNC_START.match(line):
             kinds.append("wrapper-call")
+        index = number - 1
+        if index in phrase_hits and "text-rule" not in kinds:
+            kinds.append("text-rule")
+        if index in guard_hits:
+            if "text-rule" not in kinds:
+                kinds.append("text-rule")
+            kinds.append("word-guard")
+        if index in judge_hits or index in structured_hits or index in fluent_hits:
+            if "model-call" not in kinds:
+                kinds.append("model-call")
+        if label_arg_line(line):
+            kinds.append("label-arg")
+        if TASK_OUTPUT_ARG.search(line):
+            kinds.append("task-output")
         if kinds:
             found.append((number, kinds))
     return found
@@ -350,7 +553,14 @@ def line_hits(text, wrappers=None):
 
 def keep_file(found):
     kinds = {k for _, ks in found for k in ks}
-    return bool(kinds & STRONG or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
+    return bool(kinds & STRONG or "word-guard" in kinds
+                or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
+
+
+def eligible_wrapper(name):
+    """A public function name that can be the repository's own model client, not a decision."""
+    return (len(name) >= WRAPPER_MIN_LEN and name not in WRAPPER_STOP
+            and not name.startswith(("_", "test")) and not DECISION_NAME.search(name))
 
 
 def wrapper_names(spans, found, lines):
@@ -361,8 +571,7 @@ def wrapper_names(spans, found, lines):
     names = set()
     for (_, qualified), kinds in by_function(spans, found, lines).items():
         name = short(qualified)
-        if (kinds & MODEL_REACH and len(name) >= WRAPPER_MIN_LEN and name not in WRAPPER_STOP
-                and not name.startswith(("_", "test")) and not DECISION_NAME.search(name)):
+        if kinds & MODEL_REACH and eligible_wrapper(name):
             names.add(name)
     return names
 
@@ -383,8 +592,11 @@ def suggested_groups(functions):
 
 
 def scan(repo, include_tests=False, groups=None):
-    """Two passes. The first finds direct signals and learns the repository's model wrappers.
-    The second marks callers of those wrappers, so decisions behind an in-house client are not missed."""
+    """Find direct signals, learn model wrappers a few layers deep, then mark their callers.
+
+    The first pass learns wrappers in files that import a model library. Each later layer
+    is a public, non-decision function named for a model that calls an already learned
+    wrapper and is defined once, so a decision behind two in-house layers is still listed."""
     repo = Path(repo)
     listed = list_files(repo)
     rels = [rel for rel in listed if scannable(rel, include_tests)]
@@ -401,26 +613,48 @@ def scan(repo, include_tests=False, groups=None):
         scanned += 1
         if scanned % PROGRESS_EVERY == 0:
             print(f"scanned {scanned} of {len(rels)} files", file=sys.stderr, flush=True)
-        if not ANY_SIGNAL.search(text):
+        if not ANY_SIGNAL.search(text) and not TASK_OUTPUT_ARG.search(text) and not ANCHOR.search(text):
             continue
         found = line_hits(text)
         if keep_file(found):
-            remember(rel, text, found)
+            remember(rel, text, normalize_found(found))
             wrappers |= wrapper_names(spans[rel], found, text.splitlines())
     if wrappers:
-        callers, defined = [], {}
-        for rel, text in read_scannable(repo, rels):
-            for name in set(DEF_NAME.findall(text)) & wrappers:
-                defined[name] = defined.get(name, 0) + 1
-            if set(LONG_CALL.findall(text)) & wrappers:
-                callers.append(rel)
-        wrappers = {name for name in wrappers if defined.get(name, 0) <= 1}
-        pattern = re.compile(r"\b(?:" + "|".join(sorted(map(re.escape, wrappers))) + r")\s*\(") if wrappers else None
-        for rel, text in read_scannable(repo, callers if pattern else []):
-            if pattern.search(text):
+        indexed = [(rel, set(DEF_NAME.findall(text)), set(LONG_CALL.findall(text)))
+                   for rel, text in read_scannable(repo, rels)]
+        learned, pending = set(), wrappers
+        for layer in range(WRAPPER_DEPTH):
+            if not pending:
+                break
+            defined, callers = {}, []
+            for rel, defs, calls in indexed:
+                for name in defs & pending:
+                    defined[name] = defined.get(name, 0) + 1
+                if calls & pending:
+                    callers.append(rel)
+            pending = {name for name in pending if defined.get(name, 0) <= 1} - learned
+            if not pending:
+                break
+            learned |= pending
+            pattern = re.compile(r"\b(?:" + "|".join(sorted(map(re.escape, learned))) + r")\s*\(")
+            nxt = set()
+            for rel, text in read_scannable(repo, callers):
+                if not pattern.search(text):
+                    continue
                 found = line_hits(text, pattern)
                 if keep_file(found):
-                    remember(rel, text, found)
+                    remember(rel, text, normalize_found(found))
+                if layer + 1 == WRAPPER_DEPTH:
+                    continue
+                if rel not in spans:
+                    spans[rel], _parsed = file_spans(rel, text)
+                for _start, _end, qual, fn_calls in spans[rel]:
+                    name = short(qual)
+                    if (name not in learned and eligible_wrapper(name) and CLIENT_NAME.search(name)
+                            and not PREDICATE_NAME.search(name) and fn_calls & pending):
+                        nxt.add(name)
+            pending = nxt
+        wrappers = learned
     areas = assign_areas(list(hits))
     by_area = {}
     functions_total = 0
