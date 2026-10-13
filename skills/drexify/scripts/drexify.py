@@ -1057,6 +1057,8 @@ def load_map(path, repo, include_tests):
         raise SystemExit(f"cannot read map {path}: {error.strerror}. Run scan --save first.")
     except ValueError:
         raise SystemExit(f"{path} is not a valid map. Run scan --save again.")
+    if not isinstance(result, dict):
+        raise SystemExit(f"{path} is not a valid map. Run scan --save again.")
     if result.get("schema") != SCHEMA:
         raise SystemExit(f"{path} was written by another version of this script. Run scan --save again.")
     if include_tests and not result["include_tests"]:
@@ -1262,13 +1264,30 @@ def coverage_review(lines, last_site, fenced_lines, listed):
     return problems, warnings
 
 
+def read_report(report_path):
+    """Report text. UTF-16 with a BOM is accepted. Any other undecodable file is an error."""
+    if str(report_path) == "-":
+        return sys.stdin.read()
+    path = Path(report_path)
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        raise SystemExit(f"cannot read report {report_path}: {error.strerror or error}")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError as error:
+            raise SystemExit(f"cannot read report {report_path}: {error}")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise SystemExit(f"cannot read report {report_path}: {error}")
+
+
 def check(report_path, repo, fix=False):
     repo = Path(repo)
     from_stdin = str(report_path) == "-"
-    try:
-        text = sys.stdin.read() if from_stdin else Path(report_path).read_text(encoding="utf-8")
-    except OSError as error:
-        raise SystemExit(f"cannot read report {report_path}: {error.strerror or error}")
+    text = read_report(report_path)
     writable = fix and not from_stdin
     files = set(list_files(repo))
     by_suffix = {}

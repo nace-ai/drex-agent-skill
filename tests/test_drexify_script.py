@@ -1075,6 +1075,32 @@ class DrexifyScriptTests(unittest.TestCase):
             self.assertNotIn("Traceback", proc.stdout, argv)
         self.assertIn("no such file", "\n".join(drexify.check(missing_file, self.repo)["problems"]))
         self.assertTrue(any("headline not found" in p for p in drexify.check(empty, self.repo)["problems"]))
+        utf16 = Path(self.tmp.name) / "utf16.md"
+        utf16.write_bytes(
+            "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+            "- Route (`services/search/app/route.py:1`): candidate.\n"
+            "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. 0 more sites. 1 site line in total.\n".encode("utf-16"))
+        bad = Path(self.tmp.name) / "bad.md"
+        bad.write_bytes(b"\xff\x00not utf-8")
+        not_obj = Path(self.tmp.name) / "list.json"
+        not_obj.write_text("[]")
+        utf16_proc = subprocess.run([sys.executable, script, "check", str(utf16), "--repo", str(self.repo)],
+                                    capture_output=True, text=True)
+        self.assertEqual(utf16_proc.returncode, 0, utf16_proc.stderr)
+        self.assertNotIn("Traceback", utf16_proc.stderr)
+        bad_proc = subprocess.run([sys.executable, script, "check", str(bad), "--repo", str(self.repo)],
+                                  capture_output=True, text=True)
+        self.assertNotEqual(bad_proc.returncode, 0)
+        self.assertNotIn("Traceback", bad_proc.stderr)
+        self.assertNotIn("Traceback", bad_proc.stdout)
+        self.assertIn("cannot read report", bad_proc.stderr)
+        list_proc = subprocess.run([sys.executable, script, "scan", "--from", str(not_obj), "--repo", str(self.repo)],
+                                   capture_output=True, text=True)
+        self.assertNotEqual(list_proc.returncode, 0)
+        self.assertNotIn("Traceback", list_proc.stderr)
+        self.assertNotIn("Traceback", list_proc.stdout)
+        self.assertIn("not a valid map", list_proc.stderr)
 
     def test_git_and_non_git_symlinks_stay_inside_the_repo(self):
         repo = Path(self.tmp.name) / "git repo"
