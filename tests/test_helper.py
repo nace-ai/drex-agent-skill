@@ -424,15 +424,27 @@ class RequestValidationTests(OfflineTestCase):
             self.assert_private(str(caught.exception))
         self.network.assert_not_called()
 
-    def test_encoded_request_limit_is_inclusive_and_measures_bytes(self):
+    def counted_bytes(self, body):
+        payload = {"state": body["state"], "questions": body["questions"]}
+        return len(json.dumps(payload, allow_nan=False).encode("utf-8"))
+
+    def test_encoded_request_limit_counts_state_and_questions_only(self):
         body = valid_body()
         body["state"] = ""
-        overhead = len(drex.encode_request(body))
-        body["state"] = "x" * (drex.REQUEST_LIMIT - overhead)
-        self.assertEqual(len(drex.encode_request(body)), drex.REQUEST_LIMIT)
+        body["state"] = "x" * (drex.REQUEST_LIMIT - self.counted_bytes(body))
+        encoded = drex.encode_request(body)
+        self.assertEqual(self.counted_bytes(body), drex.REQUEST_LIMIT)
+        self.assertGreater(len(encoded), drex.REQUEST_LIMIT)
+        self.assertLessEqual(len(encoded) - drex.REQUEST_LIMIT, drex.MODEL_OVERHEAD_LIMIT)
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        self.allow_response(valid_response())
+        code, stdout, stderr = self.invoke(["judge"], body=body)
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["request_id"], valid_response()["request_id"])
         body["state"] += "x"
-        with self.assertRaisesRegex(drex.HelperError, "1 MiB"):
-            drex.encode_request(body)
+        self.network.reset_mock()
+        self.network.side_effect = AssertionError("Unexpected HTTP attempt in offline test")
+        self.assert_failure(self.invoke(["judge"], body=body))
         # Raw UTF-8 can fit while ensure_ascii JSON escaping exceeds the limit.
         body["state"] = "é" * (drex.REQUEST_LIMIT // 4)
         raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -450,9 +462,12 @@ class RequestValidationTests(OfflineTestCase):
 
     def test_missing_file_and_malformed_file_errors_hide_path_and_input(self):
         filename = self.folder / (PRIVATE_INPUT + ".json")
-        self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        stderr = self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        self.assertIn("not found", stderr)
+        self.assertNotIn(PRIVATE_INPUT, stderr)
         filename.write_text(PRIVATE_INPUT + SYNTHETIC_KEY, encoding="utf-8")
-        self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        stderr = self.assert_failure(self.invoke(["judge", "--input", str(filename)]))
+        self.assertNotIn("not found", stderr)
         self.network.assert_not_called()
 
     def test_load_body_accepts_file_with_spaces(self):
@@ -461,6 +476,7 @@ class RequestValidationTests(OfflineTestCase):
         self.assertEqual(drex.load_body(str(filename)), valid_body())
 
     def test_raw_input_limit_for_file_and_stdin(self):
+        read_limit = drex.REQUEST_LIMIT + drex.MODEL_OVERHEAD_LIMIT
         exact = b"0" + b" " * (drex.REQUEST_LIMIT - 1)
         self.stdin.buffer = io.BytesIO(exact)
         self.assertEqual(drex.load_body("-"), 0)
@@ -469,13 +485,39 @@ class RequestValidationTests(OfflineTestCase):
         self.assertEqual(drex.load_body(str(filename)), 0)
         for source in ("-", str(filename)):
             with self.subTest(source="stdin" if source == "-" else "file"):
-                oversized = exact + b" " * 200
+                oversized = exact + b" " * (drex.MODEL_OVERHEAD_LIMIT + 50)
                 filename.write_bytes(oversized)
                 self.stdin.buffer = io.BytesIO(oversized)
                 with self.assertRaisesRegex(drex.HelperError, "1 MiB"):
                     drex.load_body(source)
                 if source == "-":
-                    self.assertEqual(self.stdin.buffer.tell(), drex.REQUEST_LIMIT + 1)
+                    self.assertEqual(self.stdin.buffer.tell(), read_limit + 1)
+        self.network.assert_not_called()
+
+    def test_documented_state_shapes_and_score_minimum(self):
+        states = ("", "plain text", "状态 café 😀", {"ticket": "T-1", "note": "😀"},
+                  ["Refund please", "Where is my order?"], None, 0, 1.5, True, False)
+        for index, state in enumerate(states):
+            with self.subTest(case=index):
+                body = valid_body()
+                body["state"] = state
+                self.assertEqual(json.loads(drex.encode_request(body))["state"], state)
+        body = valid_body()
+        body["questions"] = {
+            "only": {"type": "score", "criteria": ["only"]},
+            "label": {"type": "choice", "criteria": {"other": None}},
+            "safe": {"type": "noul", "criteria": {"true": "Yes", "note": "ignored by Drex"}},
+        }
+        self.assertEqual(json.loads(drex.encode_request(body))["questions"], body["questions"])
+        body["questions"] = {"safe": {"type": "noul", "criteria": {"note": "not a real criterion"}}}
+        self.assert_invalid_body(body)
+        body = valid_body()
+        body["questions"] = {"empty": {"type": "score", "criteria": []}}
+        self.assert_invalid_body(body)
+
+    def test_empty_stdin_is_rejected_without_traceback(self):
+        stderr = self.assert_failure(self.invoke(["judge"], raw=b""))
+        self.assertIn("valid JSON", stderr)
         self.network.assert_not_called()
 
 

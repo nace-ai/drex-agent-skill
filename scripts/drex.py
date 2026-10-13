@@ -15,6 +15,7 @@ import urllib.request
 
 BASE_URL = "https://drex.nace.ai"
 REQUEST_LIMIT = 1048576
+MODEL_OVERHEAD_LIMIT = 1024
 RESPONSE_LIMIT = 8 * 1048576
 
 
@@ -70,17 +71,26 @@ def encode_request(body):
             if not isinstance(criteria, list) or not criteria or any(not isinstance(v, str) for v in criteria):
                 raise HelperError("score criteria must be a non-empty array of strings.")
         elif kind == "noul":
-            if criteria is not None and (not isinstance(criteria, dict) or any(k not in ("true", "false") or not isinstance(v, (str, type(None))) for k, v in criteria.items())):
+            if criteria is not None and not isinstance(criteria, dict):
                 raise HelperError("noul criteria may contain true/false descriptions as strings or null.")
-            if not instructions.strip() and not any(v and v.strip() for v in (criteria or {}).values()):
+            described = criteria or {}
+            for label in ("true", "false"):
+                if label in described and not isinstance(described[label], (str, type(None))):
+                    raise HelperError("noul criteria may contain true/false descriptions as strings or null.")
+            if not instructions.strip() and not any(
+                    isinstance(described.get(label), str) and described[label].strip()
+                    for label in ("true", "false")):
                 raise HelperError("noul needs a non-empty instruction or criterion.")
         else:
             raise HelperError("Question type must be choice, noul, or score.")
     try:
         encoded = json.dumps(body, allow_nan=False).encode("utf-8")
+        counted = json.dumps(
+            {"state": body["state"], "questions": body["questions"]}, allow_nan=False,
+        ).encode("utf-8")
     except (ValueError, TypeError):
         raise HelperError("Request must contain valid, finite JSON values.") from None
-    if len(encoded) > REQUEST_LIMIT:
+    if len(counted) > REQUEST_LIMIT:
         raise HelperError("Request exceeds the hosted 1 MiB JSON limit.")
     return encoded
 
@@ -164,15 +174,20 @@ def validate_response(result, body):
 
 
 def load_body(filename):
+    read_limit = REQUEST_LIMIT + MODEL_OVERHEAD_LIMIT
     try:
         if filename == "-":
-            raw = sys.stdin.buffer.read(REQUEST_LIMIT + 1)
+            raw = sys.stdin.buffer.read(read_limit + 1)
         else:
             with Path(filename).open("rb") as file:
-                raw = file.read(REQUEST_LIMIT + 1)
-        if len(raw) > REQUEST_LIMIT:
+                raw = file.read(read_limit + 1)
+        if len(raw) > read_limit:
             raise HelperError("Request file exceeds 1 MiB.")
         return json.loads(raw)
+    except FileNotFoundError:
+        raise HelperError("Request file was not found.") from None
+    except HelperError:
+        raise
     except (OSError, ValueError, UnicodeError):
         raise HelperError("Could not read a valid JSON request; input content is not logged.") from None
 
