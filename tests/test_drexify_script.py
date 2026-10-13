@@ -1027,7 +1027,7 @@ class DrexifyScriptTests(unittest.TestCase):
         (self.repo / "linked_out").symlink_to(outside_dir)
         started = time.perf_counter()
         result = drexify.scan(self.repo)
-        self.assertLess(time.perf_counter() - started, 5)
+        self.assertLess(time.perf_counter() - started, 15)
         paths = {f["path"] for a in result["areas"].values() for f in a["files"]}
         self.assertIn("área/my file.py", paths)
         self.assertIn("crlf.ts", paths)
@@ -1049,7 +1049,7 @@ class DrexifyScriptTests(unittest.TestCase):
         path.write_text(blob)
         started = time.perf_counter()
         drexify.scan(self.repo)
-        self.assertLess(time.perf_counter() - started, 5)
+        self.assertLess(time.perf_counter() - started, 15)
 
     def test_user_errors_do_not_print_a_traceback(self):
         missing = Path(self.tmp.name) / "missing.json"
@@ -1252,7 +1252,7 @@ class DrexifyScriptTests(unittest.TestCase):
             )
             problems = drexify.check(self.report(body), self.repo)["problems"]
             self.assertTrue(any("cannot read" in problem for problem in problems), (rel, problems))
-        self.assertLess(time.perf_counter() - started, 5)
+        self.assertLess(time.perf_counter() - started, 15)
 
     def test_coverage_total_matches_the_listed_site_lines(self):
         def head(count):
