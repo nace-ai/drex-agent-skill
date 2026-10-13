@@ -2,6 +2,11 @@
 import importlib.util
 import io
 import json
+import os
+import re
+import subprocess
+import sys
+import time
 from contextlib import redirect_stdout
 from unittest import mock
 from pathlib import Path
@@ -39,6 +44,10 @@ class DrexifyScriptTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def report(self, body):
+        if not re.search(r"candidate\s+functions?", body, re.I):
+            if body and not body.endswith("\n"):
+                body += "\n"
+            body += "Coverage: checked the candidate functions listed above.\n"
         path = Path(self.tmp.name) / "report.md"
         path.write_text(body)
         return path
@@ -76,8 +85,9 @@ class DrexifyScriptTests(unittest.TestCase):
         body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
                 "- Contract matching (`.../app/match.py:3`): candidate.\n")
         path = self.report(body)
+        written = path.read_text()
         self.assertTrue(any("run with --fix" in p for p in drexify.check(path, self.repo)["problems"]))
-        self.assertEqual(path.read_text(), body)
+        self.assertEqual(path.read_text(), written)
         result = drexify.check(path, self.repo, fix=True)
         self.assertEqual(result["problems"], [])
         self.assertIn("`services/billing/app/match.py:3`", path.read_text())
@@ -86,9 +96,10 @@ class DrexifyScriptTests(unittest.TestCase):
         body = ("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
                 "- Doc classify (`classify.py:4`): candidate.\n")
         path = self.report(body)
+        written = path.read_text()
         result = drexify.check(path, self.repo, fix=True)
         self.assertTrue(any("ambiguous, matches 2 files" in p for p in result["problems"]))
-        self.assertEqual(path.read_text(), body)
+        self.assertEqual(path.read_text(), written)
 
     def test_check_rejects_site_pointers_without_a_line(self):
         path = self.report("Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
@@ -250,6 +261,7 @@ class DrexifyScriptTests(unittest.TestCase):
             "  async classifyDoc(text: string): Promise<Label> {": "classifyDoc",
             "  async classifyDoc(": "classifyDoc",
             "export const route = async (q: string) => {": "route",
+            'const fetchIt = (url = "http://example.test") => {': "fetchIt",
             "const pick = <T>(xs: T[]) => {": "pick",
             "export function triage(x) {": "triage",
             "func (s *Svc) Detect(ctx context.Context) error {": "Detect",
@@ -767,6 +779,264 @@ class DrexifyScriptTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(drexify.main(["check", str(good), "--repo", str(self.repo)]), 1)
             self.assertEqual(drexify.main(["scan", "--repo", str(self.repo), "--groups", "2"]), 0)
+
+    def test_migration_folders_are_skipped_even_with_include_tests(self):
+        skipped = (
+            "backend/alembic/versions/001_init.py",
+            "app/migrations/0001_initial.py",
+            "prisma/migrations/20200101000000_init/migration.ts",
+            "supabase/migrations/001_init.ts",
+            "db/migrations/001_init.js",
+            "db/migrate/20240101000000_create_users.rb",
+            "engines/blog/db/migrate/001_create.rb",
+            "src/main/resources/flyway/V1__init.java",
+        )
+        kept = (
+            "app/migration_utils.py",
+            "services/data_migration_service/run.py",
+            "lib/migrate/helper.rb",
+        )
+        body = "def upgrade():\n    return client.chat.completions.create(model='m')\n"
+        for rel in skipped + kept:
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        for include_tests in (False, True):
+            paths = {f["path"] for a in drexify.scan(self.repo, include_tests=include_tests)["areas"].values()
+                     for f in a["files"]}
+            for rel in skipped:
+                self.assertNotIn(rel, paths, include_tests)
+            for rel in kept:
+                self.assertIn(rel, paths, include_tests)
+
+    def test_source_test_roots_are_not_reopened_by_an_evaluation_package(self):
+        scanned = "src/main/java/com/acme/evaluation/Ranker.java"
+        hidden = (
+            "src/test/java/com/acme/evaluation/EvalRanker.java",
+            "src/androidTest/java/com/acme/evaluation/Ranker.java",
+            "src/integrationTest/kotlin/com/acme/evaluation/Ranker.kt",
+            "src/testFixtures/java/com/acme/evaluation/Ranker.java",
+        )
+        text = "void evaluate() { client.chat.completions.create(model); }\n"
+        for rel in (scanned,) + hidden:
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn(scanned, paths)
+        for rel in hidden:
+            self.assertNotIn(rel, paths)
+        with_tests = {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]}
+        self.assertIn(hidden[0], with_tests)
+
+    def test_test_file_names_cover_vitest_e2e_bench_and_jvm(self):
+        skipped = (
+            "models.vitest.ts", "lineStream.vitest.tsx", "a.vitest.js", "a.vitest.mjs", "a.vitest.cjs",
+            "flow.e2e.ts", "parse.bench.js", "foo_test.go", "test_foo.py", "foo_test.py", "foo.test.ts",
+            "foo.spec.js", "FooTest.java", "FooTests.java", "FooIT.java", "FooTest.kt", "foo_spec.rb",
+        )
+        kept = ("latest.ts", "contest.py", "attestation.go", "Testimonial.java", "migration_utils.py")
+        for name in skipped + kept:
+            self.assertEqual(drexify.is_test_name(name), name in skipped, name)
+        for name in skipped + kept:
+            path = self.repo / "pkg" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("function classifyDoc() { return client.chat.completions.create(1) }\n")
+        paths = {f["path"] for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        for name in skipped:
+            self.assertNotIn(f"pkg/{name}", paths, name)
+        for name in kept:
+            self.assertIn(f"pkg/{name}", paths, name)
+
+    def test_prompt_constants_are_not_candidate_functions(self):
+        text = (
+            "const RERANK_PROMPT = (\n"
+            "  query: string,\n"
+            "  document: string,\n"
+            ") => `Is ${query} relevant to ${document}?\n"
+            "def read_root():\n"
+            "  return 1\n"
+            "fn bubble_sort() {\n"
+            "  return 1\n"
+            "}`;\n\n"
+            "const NOTES = (\n"
+            "  \"rerank these documents\"\n"
+            ");\n\n"
+            "const pick = async (q: string) => {\n"
+            "  return client.chat.completions.create({ model: \"m\" });\n"
+            "};\n\n"
+            "const send = async (\n"
+            "  q: string,\n"
+            ") => {\n"
+            "  return client.chat.completions.create({ model: \"m\" });\n"
+            "};\n\n"
+            "export async function scoreChunk(query: string) {\n"
+            "  return complete(RERANK_PROMPT(query, \"doc\"));\n"
+            "}\n"
+        )
+        starts = [name for _, name in drexify.generic_starts(text.splitlines())]
+        self.assertNotIn("read_root", starts)
+        self.assertNotIn("bubble_sort", starts)
+        self.assertNotIn("NOTES", starts)
+        self.assertIn("pick", starts)
+        self.assertIn("send", starts)
+        spans, _ = drexify.file_spans("llm.ts", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertNotIn("RERANK_PROMPT", got)
+        self.assertIn("pick", got)
+        self.assertIn("send", got)
+        self.assertIn("scoreChunk", got)
+        nested = (
+            "export function createToolCallAccuracyScorerLLM({ model }: Options) {\n"
+            "  const text = tools.map(tool => `${tool.id}`).join('\\n');\n"
+            "  return createScorer({\n"
+            "    judge: {\n"
+            "      model,\n"
+            "    },\n"
+            "  });\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("scorer.ts", nested)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(nested), nested.splitlines())]
+        self.assertEqual(got, ["createToolCallAccuracyScorerLLM"])
+        self.assertEqual(spans[0][1], len(nested.splitlines()))
+
+    def test_coverage_line_is_checked_after_the_site_list(self):
+        site = "- Route (`services/search/app/route.py:1`): candidate.\n"
+        head = "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+        bare = self.report(head + site)
+        bare.write_text(head + site)
+        self.assertTrue(any("no coverage line" in p for p in drexify.check(bare, self.repo)["problems"]))
+        good = (
+            "Checked 1 of 1 candidate functions: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. Opened 0 of 0 files without one and looked around the candidates: "
+            "0 more sites. 1 site line in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + good), self.repo)["problems"], [])
+        singular = (
+            "Checked 1 of 1 candidate function: 1 site, 0 callers, wrappers, or backends, "
+            "0 not decisions, 0 dead. Opened 1 of 1 file without one and looked around the candidates: "
+            "0 more sites. 1 site line in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + singular), self.repo)["problems"], [])
+        wrapped = (
+            "Checked 1,212 of 1,212 candidate functions: 48 sites, 61 callers, wrappers, or backends,\n"
+            "1,099 not decisions, 4 dead. Opened 95 of 95 files without one and looked around the\n"
+            "candidates: 6 more sites. 54 site lines in total.\n"
+        )
+        self.assertEqual(drexify.check(self.report(head + site + wrapped), self.repo)["problems"], [])
+        bad_sum = good.replace("0 not decisions", "1 not decisions")
+        self.assertTrue(any("buckets sum" in p for p in drexify.check(self.report(head + site + bad_sum), self.repo)["problems"]))
+        short = good.replace("Checked 1 of 1", "Checked 1 of 4")
+        result = drexify.check(self.report(head + site + short), self.repo)
+        self.assertEqual(result["problems"], [])
+        self.assertTrue(any("checked 1 of 4" in w for w in result["warnings"]))
+        bad_total = good.replace("1 site line in total", "3 site lines in total")
+        self.assertTrue(any("site lines in total" in p for p in drexify.check(self.report(head + site + bad_total), self.repo)["problems"]))
+        early = self.report(good + head + site)
+        early.write_text(good + head + site)
+        self.assertTrue(any("no coverage line" in p for p in drexify.check(early, self.repo)["problems"]))
+
+
+    def test_scan_survives_empty_repos_odd_files_and_symlinks(self):
+        empty = Path(self.tmp.name) / "empty café"
+        empty.mkdir()
+        result = drexify.scan(empty)
+        self.assertEqual((result["listed"], result["scanned"], result["candidate_functions"], result["head"]), (0, 0, 0, None))
+        odd = self.repo / "área" / "my file.py"
+        odd.parent.mkdir()
+        odd.write_bytes("def classify_doc(t):\n    return client.chat.completions.create(model='m')\n".encode())
+        (self.repo / "broken.py").write_bytes(b"\xff\xfe def classify_doc(t):\n    pass\n")
+        (self.repo / "binary.js").write_bytes(b"\x00\x01\x02function classify(x){return 1}\n")
+        crlf = self.repo / "crlf.ts"
+        crlf.write_bytes(b"export function classifyDoc(t: string) {\r\n  return llm.chat.completions.create(t);\r\n}\r\n")
+        under = self.repo / "under.py"
+        over = self.repo / "over.py"
+        signal = b"def classify_doc(t):\n    return client.chat.completions.create(model='m')\n"
+        under.write_bytes(signal + b"#" * (drexify.MAX_BYTES - len(signal)))
+        over.write_bytes(signal + b"#" * (drexify.MAX_BYTES - len(signal) + 1))
+        self.assertEqual(under.stat().st_size, drexify.MAX_BYTES)
+        self.assertEqual(over.stat().st_size, drexify.MAX_BYTES + 1)
+        outside = Path(self.tmp.name) / "outside.py"
+        outside.write_text("def classify_outside(t):\n    return client.chat.completions.create(model='m')\n")
+        (self.repo / "escape.py").symlink_to(outside)
+        inside = self.repo / "inside_target.py"
+        inside.write_text("def classify_inside(t):\n    return client.chat.completions.create(model='m')\n")
+        (self.repo / "alias.py").symlink_to(inside)
+        (self.repo / "loop_a.js").symlink_to(self.repo / "loop_b.js")
+        (self.repo / "loop_b.js").symlink_to(self.repo / "loop_a.js")
+        (self.repo / "loopdir").mkdir()
+        (self.repo / "loopdir" / "again").symlink_to(self.repo / "loopdir")
+        outside_dir = Path(self.tmp.name) / "outside_dir"
+        outside_dir.mkdir()
+        (outside_dir / "hidden.py").write_text("def classify_hidden(t):\n    return client.chat.completions.create(model='m')\n")
+        (self.repo / "linked_out").symlink_to(outside_dir)
+        started = time.perf_counter()
+        result = drexify.scan(self.repo)
+        self.assertLess(time.perf_counter() - started, 5)
+        paths = {f["path"] for a in result["areas"].values() for f in a["files"]}
+        self.assertIn("área/my file.py", paths)
+        self.assertIn("crlf.ts", paths)
+        self.assertIn("under.py", paths)
+        self.assertIn("alias.py", paths)
+        self.assertNotIn("over.py", paths)
+        self.assertNotIn("escape.py", paths)
+        self.assertNotIn("linked_out/hidden.py", paths)
+        self.assertIsNone(result["head"])
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual(files["crlf.ts"]["functions"][0]["line"], 1)
+
+    def test_minified_line_does_not_hang(self):
+        blob = "function classify(x){" + ("a.b(c);" * 129000) + "return x}"
+        self.assertGreater(len(blob), 900_000)
+        path = self.repo / "pkg" / "bundle.js"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(blob)
+        started = time.perf_counter()
+        drexify.scan(self.repo)
+        self.assertLess(time.perf_counter() - started, 5)
+
+    def test_user_errors_do_not_print_a_traceback(self):
+        missing = Path(self.tmp.name) / "missing.json"
+        broken = Path(self.tmp.name) / "broken.json"
+        broken.write_text("{")
+        empty = Path(self.tmp.name) / "empty.md"
+        empty.write_text("")
+        missing_file = self.report(
+            "Identified 1 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidates)\n"
+            "- Missing (`services/nope.py:1`): candidate.\n")
+        script = str(SCRIPT)
+        cases = (
+            ["scan", "--from", str(missing), "--repo", str(self.repo)],
+            ["scan", "--from", str(broken), "--repo", str(self.repo)],
+            ["check", str(empty), "--repo", str(self.repo)],
+            ["check", str(Path(self.tmp.name) / "no-report.md"), "--repo", str(self.repo)],
+            ["check", str(missing_file), "--repo", str(self.repo)],
+        )
+        for argv in cases:
+            proc = subprocess.run([sys.executable, script, *argv], capture_output=True, text=True)
+            self.assertNotEqual(proc.returncode, 0, argv)
+            self.assertNotIn("Traceback", proc.stderr, argv)
+            self.assertNotIn("Traceback", proc.stdout, argv)
+        self.assertIn("no such file", "\n".join(drexify.check(missing_file, self.repo)["problems"]))
+        self.assertTrue(any("headline not found" in p for p in drexify.check(empty, self.repo)["problems"]))
+
+    def test_git_and_non_git_symlinks_stay_inside_the_repo(self):
+        repo = Path(self.tmp.name) / "git repo"
+        repo.mkdir()
+        (repo / "keep.py").write_text("def classify_doc(t):\n    return client.chat.completions.create(model='m')\n")
+        outside = Path(self.tmp.name) / "secret.py"
+        outside.write_text("def classify_secret(t):\n    return client.chat.completions.create(model='m')\n")
+        (repo / "secret.py").symlink_to(outside)
+        env = dict(os.environ, GIT_AUTHOR_NAME="drexify", GIT_AUTHOR_EMAIL="drexify@example.com",
+                   GIT_COMMITTER_NAME="drexify", GIT_COMMITTER_EMAIL="drexify@example.com")
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, env=env)
+        paths = {f["path"] for a in drexify.scan(repo)["areas"].values() for f in a["files"]}
+        self.assertIn("keep.py", paths)
+        self.assertNotIn("secret.py", paths)
+        self.assertIsNotNone(drexify.scan(repo)["head"])
 
 
 if __name__ == "__main__":
