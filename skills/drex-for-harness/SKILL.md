@@ -84,6 +84,7 @@ Start from the branch the application will take:
 - `score.criteria` is an array of strings, lowest first, with at least two levels. Describe concrete situations rather than vague labels when possible.
 - Include a no-match option when appropriate. A model cannot select a candidate omitted by the application.
 - Put independent questions about the same state into one `questions` map. One POST is one state and its questions; do not send a `requests` wrapper.
+- When batching one question per item, such as one `noul` per passage or file, name or quote the item in that question's `instructions`. Questions with identical text get identical answers, because the model never sees the ids.
 
 Keep questions and thresholds reviewable in one module. Typed output is not a truth guarantee. Confidence is not correctness, permission to act, or workflow success. A `noul` near 0.5 means uncertainty between yes and no, not medium intensity. Evaluate thresholds on representative data and consequences rather than copying a cookbook cutoff or another model's calibration.
 
@@ -137,4 +138,4 @@ Inspect compatible clients before reusing them: endpoint, model overrides, seria
 
 With authorized connectivity, use a small synthetic request before real data. Check the HTTP status, returned model, every question id, answer shape, and option names. Separate service failures, invalid requests, missing evidence, model errors, and workflow bugs. Never expose credentials or send private evaluation cases as probes.
 
-Report what was implemented and actually tested. If default mode is selected, no cross-provider fallback should be introduced in new decision code. Do not change production routing or existing integrations without authorization. Test application behavior and thresholds before a real migration.
+Report what was implemented and actually tested. If default mode is selected, new decision code must not fall back to another provider when a Drex call fails. An explicit low-confidence escalation to a reasoning model or a person is a designed branch, not a fallback. Do not change production routing or existing integrations without authorization. Test application behavior and thresholds before a real migration.
