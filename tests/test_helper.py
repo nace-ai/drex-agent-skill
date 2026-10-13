@@ -882,12 +882,113 @@ class JudgeAndResponseTests(OfflineTestCase):
             drex.validate_response(result, valid_body())
 
 
+def sample_catalog():
+    return {
+        "models": [
+            {
+                "name": "drex-v1.0",
+                "description": "Pinned model.\nStates up to 131,072 tokens.",
+                "release_date": "2026-09-24",
+                "alias_for": None,
+                "tier": PRIVATE_SERVER,
+            },
+            {
+                "name": "drex-latest",
+                "description": "Points to drex-v2.0. " + SYNTHETIC_KEY,
+                "release_date": "2026-10-06",
+                "alias_for": "drex-v2.0",
+            },
+        ],
+        "request_id": "req_" + "ab" * 16,
+        "note": SYNTHETIC_KEY,
+    }
+
+
+class ModelsCommandTests(OfflineTestCase):
+    def test_models_lists_catalog_without_inference_or_secrets(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY + "\n"
+        os.environ["HTTPS_PROXY"] = "https://example.invalid/proxy"
+        opener, response = self.allow_response(sample_catalog())
+        code, stdout, stderr = self.invoke(["models", "--no-input"])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(stdout.splitlines(), [
+            "drex-v1.0  2026-09-24  Pinned model. States up to 131,072 tokens.",
+            "drex-latest -> drex-v2.0  2026-10-06  Points to drex-v2.0. [REDACTED]",
+        ])
+        self.assert_private(stdout)
+        self.assertNotIn(PRIVATE_SERVER, stdout)
+        req = opener.open.call_args.args[0]
+        self.assertEqual(req.full_url, "https://drex.nace.ai/v1/models")
+        self.assertEqual(req.get_method(), "GET")
+        self.assertIsNone(req.data)
+        self.assertEqual(req.get_header("Authorization"), "Bearer " + SYNTHETIC_KEY)
+        proxy, redirect = self.network.call_args.args
+        self.assertEqual(proxy.proxies, {})
+        self.assertIsInstance(redirect, drex.NoRedirect)
+        response.read.assert_called_once_with(drex.RESPONSE_LIMIT + 1)
+        self.prompt.assert_not_called()
+        self.child.assert_not_called()
+
+    def test_models_accepts_extra_fields_and_an_empty_list(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        payload = sample_catalog()
+        del payload["request_id"]
+        self.allow_response(payload)
+        code, stdout, stderr = self.invoke(["models"])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(len(stdout.splitlines()), 2)
+        self.allow_response({"models": [], "unrelated": {"secret": SYNTHETIC_KEY}})
+        code, stdout, stderr = self.invoke(["models", "--no-input"])
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+
+    def test_models_missing_list_and_bad_entries_are_not_echoed(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        for catalog in (None, [], {}, {"request_id": SYNTHETIC_KEY}, "models"):
+            with self.subTest(catalog_type=type(catalog).__name__):
+                self.allow_response(catalog)
+                stderr = self.assert_failure(self.invoke(["models", "--no-input"]))
+                self.assertIn("missing the models list", stderr)
+        bad = sample_catalog()
+        bad["models"] = {"name": SYNTHETIC_KEY}
+        self.allow_response(bad)
+        stderr = self.assert_failure(self.invoke(["models", "--no-input"]))
+        self.assertIn("unexpected model catalog", stderr)
+        bad["models"] = [{
+            "name": "drex-v1.0",
+            "description": PRIVATE_SERVER + SYNTHETIC_KEY,
+            "release_date": "2026-09-24",
+        }]
+        self.allow_response(bad)
+        self.assert_failure(self.invoke(["models", "--no-input"]))
+        bad["models"] = [{
+            "name": " ",
+            "description": PRIVATE_INPUT,
+            "release_date": "2026-09-24",
+            "alias_for": "",
+        }]
+        self.allow_response(bad)
+        self.assert_failure(self.invoke(["models", "--no-input"]))
+
+    def test_models_no_input_never_prompts_and_prompt_is_not_saved(self):
+        self.stdin.isatty.return_value = True
+        self.assert_failure(self.invoke(["models", "--no-input"]))
+        self.prompt.assert_not_called()
+        self.network.assert_not_called()
+        self.prompt.side_effect = None
+        self.prompt.return_value = SYNTHETIC_KEY
+        self.allow_response({"models": []})
+        code, stdout, stderr = self.invoke(["models"])
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+        self.assertNotIn("DREX_API_KEY", os.environ)
+        self.prompt.assert_called_once()
+
+
 class CliHelpTests(OfflineTestCase):
     def test_real_subprocess_help_is_local_and_requires_no_credentials(self):
         # Do not use the patched subprocess entry point: these are the only real
         # child processes in this suite and can only run argparse --help.
         for args in (["--help"], ["run", "--help"], ["check", "--help"],
-                     ["judge", "--help"]):
+                     ["models", "--help"], ["judge", "--help"]):
             with self.subTest(args=args):
                 result = REAL_SUBPROCESS_RUN(
                     [sys.executable, "-B", str(SCRIPT)] + args,

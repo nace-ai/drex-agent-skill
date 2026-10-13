@@ -134,6 +134,30 @@ def request(key, path, data=None):
         raise HelperError("Drex returned invalid JSON.") from None
 
 
+def model_lines(result, key):
+    if not isinstance(result, dict) or "models" not in result:
+        raise HelperError("Drex model catalog is missing the models list.")
+    models = result["models"]
+    if not isinstance(models, list):
+        raise HelperError("Drex returned an unexpected model catalog.")
+    lines = []
+    for model in models:
+        if not isinstance(model, dict) or "alias_for" not in model:
+            raise HelperError("Drex returned an unexpected model catalog.")
+        name = model.get("name")
+        description = model.get("description")
+        released = model.get("release_date")
+        alias = model["alias_for"]
+        if (not isinstance(name, str) or not name.strip()
+                or not isinstance(description, str) or not isinstance(released, str)
+                or (alias is not None and (not isinstance(alias, str) or not alias.strip()))):
+            raise HelperError("Drex returned an unexpected model catalog.")
+        head = name if alias is None else name + " -> " + alias
+        line = (head + "  " + released + "  " + description).replace("\r", " ").replace("\n", " ")
+        lines.append(line.replace(key, "[REDACTED]"))
+    return lines
+
+
 def number(value, low, high):
     try:
         return type(value) in (int, float) and low <= value <= high and math.isfinite(value)
@@ -207,6 +231,8 @@ def main(argv=None):
     run.add_argument("command", nargs=argparse.REMAINDER, help="-- claude (or another trusted command)")
     check = sub.add_parser("check", help="Validate credentials using GET /v1/models; no inference charge")
     check.add_argument("--no-input", action="store_true", help="Never prompt; use for agent tools and automation")
+    listing = sub.add_parser("models", help="List models using GET /v1/models; no inference charge")
+    listing.add_argument("--no-input", action="store_true", help="Never prompt; use for agent tools and automation")
     judge = sub.add_parser("judge", help="Send one JSON request to hosted Drex; inference is billable")
     judge.add_argument("--input", default="-", help="JSON file, or - for stdin (default)")
     args = parser.parse_args(argv)
@@ -229,6 +255,10 @@ def main(argv=None):
             if not isinstance(result, dict) or not isinstance(result.get("models"), list):
                 raise HelperError("Drex returned an unexpected model catalog.")
             print("Drex authentication verified. No inference request made; credit availability was not checked.")
+        elif args.action == "models":
+            key = api_key(interactive=not args.no_input)
+            for line in model_lines(request(key, "/v1/models"), key):
+                print(line)
         else:
             body = load_body(args.input)
             data = encode_request(body)
