@@ -263,17 +263,42 @@ def signature_closes(lines, number):
     return False
 
 
+_REGEX_PREV = set("([{:;,=!?&|~^%<>+-*")
+_REGEX_WORDS = {"return", "throw", "case", "else", "do", "void", "typeof", "delete", "in", "of",
+                "instanceof", "await", "yield", "new", "extends"}
+
+
 def mask_templates(lines):
-    """Blank template literals and block comments so a prompt cannot look like code."""
-    out, mode, depth = [], None, 0
-    for line in lines:
+    """Blank template literals and block comments so a prompt cannot look like code.
+
+    Backticks inside a regex, a quote, or a comment do not open a template. A backtick
+    that never closes is not a template: the file is masked again without it, so one bad
+    guess cannot hide the rest of the file."""
+    ignored = set()
+    while True:
+        out, unclosed = _mask_lines(lines, ignored)
+        if unclosed is None or unclosed in ignored:
+            return out
+        ignored.add(unclosed)
+
+
+def _slash_can_open_regex(prev, word):
+    return word in _REGEX_WORDS or prev is None or prev in _REGEX_PREV
+
+
+def _mask_lines(lines, ignored):
+    out = []
+    mode, depth, opener, regex_class = None, 0, None, False
+    for row, line in enumerate(lines):
         buf, i, n = [], 0, len(line)
+        prev, word = None, ""
         while i < n:
             if mode == "/*":
                 if line.startswith("*/", i):
                     mode = None
                     buf.append("  ")
                     i += 2
+                    prev, word = "/", ""
                 else:
                     buf.append(" ")
                     i += 1
@@ -289,7 +314,7 @@ def mask_templates(lines):
                     i += 2
                     continue
                 if line[i] == "`":
-                    mode = None
+                    mode, opener = None, None
                 buf.append(" ")
                 i += 1
                 continue
@@ -299,6 +324,22 @@ def mask_templates(lines):
                 elif line[i] == "}":
                     depth -= 1
                 buf.append(line[i] if depth else " ")
+                i += 1
+                continue
+            if mode == "regex":
+                ch = line[i]
+                if ch == "\\" and i + 1 < n:
+                    nxt = line[i + 1]
+                    buf.append("\\" + (" " if nxt == "`" else nxt))
+                    i += 2
+                    continue
+                if ch == "[" and not regex_class:
+                    regex_class = True
+                elif ch == "]" and regex_class:
+                    regex_class = False
+                elif ch == "/" and not regex_class:
+                    mode, prev, word = None, "/", ""
+                buf.append(" " if ch == "`" else ch)
                 i += 1
                 continue
             if line[i] in "'\"":
@@ -316,6 +357,7 @@ def mask_templates(lines):
                         break
                     buf.append(" ")
                     i += 1
+                prev, word = quote, ""
                 continue
             if line.startswith("//", i):
                 buf.append(" " * (n - i))
@@ -324,16 +366,36 @@ def mask_templates(lines):
                 mode = "/*"
                 buf.append("  ")
                 i += 2
+                prev, word = None, ""
                 continue
             if line[i] == "`":
-                mode = "`"
+                if (row, i) not in ignored:
+                    mode, depth, opener = "`", 0, (row, i)
                 buf.append(" ")
                 i += 1
                 continue
-            buf.append(line[i])
+            if line[i] == "/" and _slash_can_open_regex(prev, word):
+                mode, regex_class = "regex", False
+                buf.append("/")
+                i += 1
+                prev, word = None, ""
+                continue
+            ch = line[i]
+            buf.append(ch)
             i += 1
+            if ch in " \t":
+                continue
+            if ch.isalnum() or ch == "_":
+                word += ch
+                prev = ch
+            else:
+                word, prev = "", ch
+        if mode == "regex":
+            mode, regex_class = None, False
         out.append("".join(buf))
-    return out
+    if mode == "`" and opener is not None:
+        return out, opener
+    return out, None
 
 
 def arrow_closes(lines, number):

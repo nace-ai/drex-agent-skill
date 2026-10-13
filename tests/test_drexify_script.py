@@ -1038,6 +1038,56 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertNotIn("secret.py", paths)
         self.assertIsNotNone(drexify.scan(repo)["head"])
 
+    def test_stray_backtick_does_not_hide_later_functions(self):
+        lines = [
+            "const strip = (s) => s.replace(/`/g, '');",
+            "",
+            "export function classifyDoc(t) {",
+            " return client.chat.completions.create(t);",
+            "}",
+        ]
+        starts = drexify.generic_starts(lines)
+        self.assertIn((1, "strip"), starts)
+        self.assertIn((3, "classifyDoc"), starts)
+        spans = {name: (start, end) for start, end, name, _calls in drexify.generic_spans(lines)}
+        self.assertLess(spans["strip"][1], spans["classifyDoc"][0])
+        self.assertEqual(spans["classifyDoc"], (3, 5))
+        fence = [
+            "const fence = /^```/;",
+            "export function classifyDoc(t) {",
+            " return client.chat.completions.create(t);",
+            "}",
+        ]
+        self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(fence)])
+        quoted = [
+            "const tick = '`';",
+            'const fenceText = "```";',
+            "export function classifyDoc(t) {",
+            " return client.chat.completions.create(t);",
+            "}",
+        ]
+        self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(quoted)])
+        combined = [
+            "const strip = (s) => s.replace(/`/g, '');",
+            "const RERANK_PROMPT = `score this",
+            "function hidden() { return 1 }",
+            "`;",
+            "export function classifyDoc(t) {",
+            " return client.chat.completions.create(t);",
+            "}",
+        ]
+        combined_names = [name for _, name in drexify.generic_starts(combined)]
+        self.assertIn("strip", combined_names)
+        self.assertNotIn("hidden", combined_names)
+        self.assertIn("classifyDoc", combined_names)
+        unclosed = [
+            "const bad = `nope",
+            "export function classifyDoc(t) {",
+            " return client.chat.completions.create(t);",
+            "}",
+        ]
+        self.assertIn("classifyDoc", [name for _, name in drexify.generic_starts(unclosed)])
+
 
 if __name__ == "__main__":
     unittest.main()
