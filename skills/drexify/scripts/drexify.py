@@ -9,6 +9,8 @@ check: lint a drexify report. Counts must match the headline, statuses must be v
 """
 import argparse
 import ast
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -999,7 +1001,7 @@ def keep_file(found):
 
 CLIENT_CLASS = re.compile(
     r"^\s*(?:(?:export|default|public|final|abstract|internal|open|sealed|private)\s+)*class\s+(?:\w+(?:::|\.))*"
-    r"(?P<name>[A-Z]\w{2,}Client)\b", re.M)
+    r"(?P<name>[A-Z]\w{2,}Client|(?:[A-Z]\w*)?Bot)\b", re.M)
 CLIENT_KINDS = {"drex", "decision-api", "model-call"}
 ANY_CLASS = re.compile(
     r"^\s*(?:(?:export|default|public|final|abstract|internal|open|sealed|private|protected|static)\s+)*"
@@ -1008,9 +1010,10 @@ DECISION_CALL = re.compile(r"\bdecision_?(?:model|client)\w*\s*\.\s*a?(?:decide|
 
 
 def client_use_pattern(names):
-    """Construction or a class-level call of a learned model client class, such as `JudgeClient.new(...)`."""
+    """Construction or a class-level call of a learned model client class, such as `JudgeClient.new(...)` or
+    `Bot.as(user, agent: ...)`."""
     alt = "|".join(sorted(map(re.escape, names)))
-    return re.compile(r"\b(?:" + alt + r")\s*(?:\.|::)\s*(?:new|call|request\w*|create)\b|\bnew\s+(?:" + alt + r")\s*[(<]")
+    return re.compile(r"\b(?:" + alt + r")\s*(?:\.|::)\s*(?:new|call|request\w*|create|as)\b|\bnew\s+(?:" + alt + r")\s*[(<]")
 
 
 def eligible_wrapper(name):
@@ -1429,6 +1432,11 @@ def coverage_review(lines, last_site, fenced_lines, listed):
     def number(value):
         return int(value.replace(",", ""))
 
+    if not COVERAGE_FULL.search(text):
+        warnings.append("coverage line has no buckets, so its counts were not checked. Use: Checked N of N "
+                        "candidate functions: A sites, B callers, wrappers, or backends, C not decisions, D dead. "
+                        "Opened E of E files without one and looked around the candidates: F more sites. "
+                        "G site lines in total.")
     for match in COVERAGE_FULL.finditer(text):
         checked, total = number(match.group("checked")), number(match.group("total"))
         sites, callers = number(match.group("sites")), number(match.group("callers"))
@@ -1603,6 +1611,7 @@ def main(argv=None):
     s.add_argument("--save", metavar="FILE", help="also write the full map as JSON, for helpers to read with --from")
     s.add_argument("--from", dest="source", metavar="FILE", help="read a map written by --save instead of searching again")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--out", metavar="FILE", help="write the printed map to FILE and print only its first line")
     c = sub.add_parser("check", help="lint a drexify report")
     c.add_argument("report", help="report file, or - to read it from stdin (no --fix)")
     c.add_argument("--repo", default=".")
@@ -1624,14 +1633,24 @@ def main(argv=None):
             os.replace(partial, save)
         if args.group and not 1 <= args.group <= len(result["groups"]):
             parser.error(f"--group K needs 1 <= K <= {len(result['groups'])}, the number of groups in this map")
-        print(json.dumps(result, indent=1)) if args.json else print_scan(result, args.area, args.group)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            print(json.dumps(result, indent=1)) if args.json else print_scan(result, args.area, args.group)
+        text = buffer.getvalue()
+        if args.out:
+            Path(args.out).write_text(text, encoding="utf-8")
+            first = text.split("\n", 1)[0] if not args.json else "map as JSON"
+            print(f"{first}\nwrote {text.count(chr(10))} lines to {args.out}")
+        else:
+            sys.stdout.write(text)
         return 0
     result = check(args.report, args.repo, args.fix)
     if args.json:
         print(json.dumps(result, indent=1))
     else:
-        counts = ", ".join(f"{n} {'candidates' if s == 'candidate' else s}" for s, n in result["statuses"].items())
-        print(f"{result['sites']} sites ({counts})")
+        counts = ", ".join(f"{n} {s}{'s' if s == 'candidate' and n != 1 else ''}"
+                           for s, n in result["statuses"].items())
+        print(f"{result['sites']} site{'s' if result['sites'] != 1 else ''} ({counts})")
         for f in result["pointers_fixed"]:
             print(f"fixed: {f}")
         for w in result["warnings"]:

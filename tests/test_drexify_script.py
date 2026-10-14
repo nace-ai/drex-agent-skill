@@ -638,6 +638,20 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertNotIn("app/services/fetcher.rb", files)
         self.assertNotIn("app/clients/http_client.rb", files)
 
+    def test_scan_marks_callers_of_a_bot_class_beside_a_model_call(self):
+        (self.repo / "lib/agents").mkdir(parents=True)
+        (self.repo / "lib/agents/bot.rb").write_text(
+            "module Agents\n  class Bot\n    def self.as(user, agent:, model:)\n      new(user, agent, model)\n    end\n\n"
+            "    def reply(context)\n      llm.generate(context.prompt)\n    end\n  end\nend\n")
+        (self.repo / "lib/automation").mkdir(parents=True)
+        (self.repo / "lib/automation/triage.rb").write_text(
+            "module Triage\n  def self.handle(post:, search_for_text:)\n"
+            "    bot = Agents::Bot.as(user, agent: agent, model: model)\n"
+            "    result = bot.reply(context)\n    result.downcase.include?(search_for_text)\n  end\nend\n")
+        result = drexify.scan(self.repo)
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["lib/automation/triage.rb"]["functions"]], ["handle"])
+
     def test_ruby_methods_end_at_their_own_end_not_at_a_hash_brace(self):
         text = (
             "module Moderation\n"
@@ -992,6 +1006,41 @@ class DrexifyScriptTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(drexify.main(["check", str(good), "--repo", str(self.repo)]), 1)
             self.assertEqual(drexify.main(["scan", "--repo", str(self.repo), "--groups", "2"]), 0)
+
+    def test_check_summary_uses_the_singular_for_one_site(self):
+        path = self.report("Identified 1 site of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n"
+                           "- Route (`services/search/app/route.py:1`): candidate.\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(drexify.main(["check", str(path), "--repo", str(self.repo)]), 0)
+        self.assertIn("1 site (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n", out.getvalue())
+
+    def test_check_warns_when_the_coverage_line_has_no_buckets(self):
+        listed = ("Identified 1 site of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n"
+                  "- Route (`services/search/app/route.py:1`): candidate.\n\n")
+        short = drexify.check(self.report(listed + "Coverage: checked 4 of 4 candidate functions.\n"), self.repo)
+        self.assertEqual(short["problems"], [])
+        self.assertTrue(any("no buckets" in w for w in short["warnings"]))
+        full = drexify.check(self.report(
+            listed + "Checked 4 of 4 candidate functions: 1 site, 2 callers, wrappers, or backends, 1 not decision, "
+                     "0 dead. Opened 0 of 0 files without one and looked around the candidates: 0 more sites. "
+                     "1 site line in total.\n"), self.repo)
+        self.assertEqual(full["problems"], [])
+        self.assertFalse(any("no buckets" in w for w in full["warnings"]))
+
+    def test_scan_out_writes_the_listing_and_prints_its_first_line(self):
+        saved, listing = Path(self.tmp.name) / "map.json", Path(self.tmp.name) / "group.txt"
+        with redirect_stdout(io.StringIO()):
+            drexify.main(["scan", "--repo", str(self.repo), "--groups", "1", "--save", str(saved)])
+        whole = io.StringIO()
+        with redirect_stdout(whole):
+            drexify.main(["scan", "--from", str(saved), "--group", "1"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(drexify.main(["scan", "--from", str(saved), "--group", "1", "--out", str(listing)]), 0)
+        self.assertEqual(listing.read_text(), whole.getvalue())
+        first = whole.getvalue().split("\n", 1)[0]
+        self.assertEqual(out.getvalue(), f"{first}\nwrote {whole.getvalue().count(chr(10))} lines to {listing}\n")
 
     def test_migration_folders_are_skipped_even_with_include_tests(self):
         skipped = (
