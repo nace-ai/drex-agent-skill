@@ -23,23 +23,24 @@ HEADLINE = re.compile((
 ).replace(" ", r"\s+"))
 CONTINUATION = re.compile(r"^\s+(?![-*+]\s|\d+[.)]\s|#|```|~~~)\S")
 SITE = re.compile(r"^\s*[-*]\s+(?P<name>.+?)\s+\(`(?P<ptr>[^`]+)`\):\s*(?P<rest>.*)$")
-CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php", ".scala", ".swift"}
+CODE_EXT = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts", ".go", ".java", ".kt", ".rb", ".rs", ".cs", ".php",
+            ".scala", ".swift", ".vue", ".svelte"}
 POINTER_EXT = CODE_EXT | {".md", ".mdx", ".yaml", ".yml", ".json", ".toml", ".sql", ".sh", ".html", ".css", ".ini", ".cfg", ".txt",
-                          ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".vue", ".svelte", ".ipynb"}
+                          ".c", ".h", ".cc", ".cpp", ".hpp", ".m", ".ipynb"}
 POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<line>\d+)(?P<tail>(?:[-,:]\d+)*)`")
 SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils"}
-FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample"}
+FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample", "cookbook", "cookbooks"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 MIGRATION_DIRS = {"alembic", "migrations", "flyway"}
 SOURCE_TEST_ROOTS = {"test", "androidTest", "integrationTest", "testFixtures"}
-SCHEMA = 2
-DIRECT = {"drex", "model-call", "rerank", "fuzzy"}
+SCHEMA = 3
+DIRECT = {"drex", "decision-api", "model-call", "rerank", "fuzzy"}
 STRONG = DIRECT | {"model-import", "wrapper-call", "task-output"}
 FUNCTION_STRONG = DIRECT | {"wrapper-call", "task-output", "word-guard"}
-FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "text-rule", "local-call"}
+FUNCTION_WEAK = {"label-set", "llm-mention", "regex", "text-rule", "local-call", "embedding", "decision-type"}
 MODEL_REACH = {"model-call", "wrapper-call", "model-reach"}
 MAX_BYTES = 1_000_000
 MAX_LINES_PER_FILE = 8
@@ -85,13 +86,21 @@ DEF_NAME = re.compile(r"\b(?:(?:def|function|func|fn|fun)\s+|func\s*\([^)]*\)\s*
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
 SIGNALS = (
-    ("drex", re.compile(r"\b(systemone|system_one|drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
+    ("drex", re.compile(r"\b(drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
+    # The decision API shape, on the Drex host or another provider. The host decides the status.
+    ("decision-api", re.compile(
+        r"\bsystem_?one|['\"]noul['\"]|\bdecision_?(?:model|client)\w*\s*\.\s*a?(?:decide|evaluate)\w*\s*\(", re.I)),
+    ("decision-type", re.compile(r"\bdecision_?(?:model|client)", re.I)),
     ("model-call", re.compile(
         r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
         r"\.GenerateContent\s*\(|:generateContent\b|\bGenerateFromSinglePrompt\s*\(|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
         r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"
         r"\b\w*classifier\w*\s*\.\s*(?:decide|classify|predict)\s*\(|"
+        r"\b(?:a?call|invoke|ask|query)_?(?:llm|chat_?model|language_?model)\s*\(|"
+        r"\b\w*(?:judge|evaluator|grader)\w*\s*\.\s*a?run\s*\(|\b\w*model\w*\s*\.\s*a?response\s*\(|"
+        r"\bmoderations\.create\s*\(|\.\s*a?moderate\s*\(|\.predict_proba\s*\(|\.decision_function\s*\(|"
+        r"\bdetect_langs?\s*\(|\bNNetLanguageIdentifier\b|\.detect_language\s*\(|"
         r"new Sentiment\(|sentiment\.analyze\s*\(|SentimentIntensityAnalyzer\(|\bTextBlob\(", re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
     ("model-import", re.compile(
@@ -105,6 +114,7 @@ SIGNALS = (
                          r"\bregexp\.(?:MustCompile|Compile|MatchString)\(|\bPattern\.compile\(|\bRegex::new\(|"
                          r"\bpreg_match\(")),
     ("rerank", re.compile(r"cross.?encoder|rerank", re.I)),
+    ("embedding", re.compile(r"cosine_?similarity|\.embed(?:_query|_documents|Query|Documents)?\s*\(", re.I)),
     ("text-rule", re.compile(r"\.lower\(\)\s*(?:in\b|==|\.startswith|\.endswith)|\bin\s+[\w.]+\.lower\(\)|"
                              r"\bany\(\s*\w+\s+in\s+[\w.]+\s+for\b|\.toLowerCase\(\)\s*(?:===?|\.includes|\.startsWith|\.endsWith)|"
                              r"\bstrings\.ToLower\([^)]*\)\s*(?:==|!=)|\bstrings\.(?:Contains|HasPrefix|HasSuffix)\(strings\.ToLower|"
@@ -164,7 +174,7 @@ def git_state(repo):
 
 
 TEST_FILE = re.compile(
-    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs|mts|cts)|_spec\.rb|"
+    r"(?:_test\.\w+|\.(?:test|spec|e2e|bench|stories|clienttest)\.\w+|\.vitest\.(?:tsx?|js|mjs|cjs|mts|cts)|_spec\.rb|"
     r"(?:Test|Tests|IT)\.java|Tests?\.kt|Tests?\.cs|Test\.php|(?:Spec|Test)\.scala|Tests\.swift)$")
 _EXEMPT_TEST_STEMS = ("ab_test", "split_test", "load_test", "stress_test", "smoke_test")
 _TEST_DIR_NAMES = {name.lower() for name in TEST_DIRS}
@@ -180,7 +190,7 @@ def _production_experiment_name(name):
 
 
 def is_test_name(name):
-    if name == "tests.py" or name.startswith("test_"):
+    if name in ("tests.py", "tests.rs") or name.startswith("test_"):
         return True
     if _production_experiment_name(name):
         return False
@@ -520,6 +530,10 @@ def generic_starts(lines):
                 name = arrow.group("name") if arrow and arrow_closes(visible, number) else None
         if name and name not in NOT_FUNCTIONS:
             starts.append((number, name))
+    if any(AI_SERVICE_TEXT.search(line) for line in lines):
+        taken = {number for number, _name in starts}
+        starts.extend((index + 1, name) for index, name in ai_service_methods(visible).items() if index + 1 not in taken)
+        starts.sort()
     return starts
 
 
@@ -531,8 +545,12 @@ def generic_spans(lines):
     An arrow that returns a template ends when that template ends."""
     visible = mask_templates(lines)
     starts = generic_starts(lines)
+    bodiless = set(ai_service_methods(visible)) if any(AI_SERVICE_TEXT.search(line) for line in lines) else set()
     spans = []
     for index, (line, name) in enumerate(starts):
+        if line - 1 in bodiless:
+            spans.append((line, line, name, set()))
+            continue
         templated = arrow_template_end(lines, line)
         if templated:
             body = "\n".join(lines[line - 1:templated])
@@ -770,7 +788,9 @@ CHAT_BUILDER = re.compile(r"chatClientBuilder|ChatClient\s*\.\s*builder\s*\(")
 ANY_MATCH = re.compile(r"\.anyMatch\s*\(")
 CONTAINS_CALL = re.compile(r"\.contains\s*\(")
 LOWER_CALL = re.compile(r"\.toLowerCase\s*\(|\.equalsIgnoreCase\s*\(")
-ANCHOR = re.compile(r"(?<![\w.'\"`])judge\s*:|(?<![\w.])structuredOutput\s*:\s*\{")
+ANCHOR = re.compile(r"(?<![\w.'\"`])judge\s*:|(?<![\w.])structuredOutput\s*:\s*\{|@(?:UserMessage|SystemMessage)\b|"
+                    r"\bfrom\s+(?:langdetect|langid|lingua|fast_langdetect|ftlangdetect)\s+import\b|"
+                    r"""\btype['"]?\s*(?:=>|[:=])\s*['"](?:noul|choice|score)['"]""")
 
 
 def nearby(lines, index, pattern, before, after):
@@ -827,13 +847,72 @@ def java_word_guard_hits(lines):
     return hits
 
 
+DECISION_QUESTION = re.compile(r"""\btype['"]?\s*(?:=>|[:=])\s*['"](?:noul|choice|score)['"]""")
+QUESTION_FIELD = re.compile(r"\b(?:instructions|criteria)\b")
+LANGUAGE_ID_IMPORT = re.compile(r"^\s*from\s+(?:langdetect|langid|lingua|fast_langdetect|ftlangdetect)\s+import\s+([\w, ]+)")
+PY_WORD_GUARD = re.compile(r"\bany\(\s*(\w+)\s+in\s+\S+?\.lower\(\)\s+for\s+\1\s+in\s")
+AI_SERVICE_ANNOTATION = re.compile(r"^\s*@(?:UserMessage|SystemMessage)\b")
+AI_SERVICE_TEXT = re.compile(r"@(?:UserMessage|SystemMessage)\b")
+BODILESS_METHOD = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(?P<name>[A-Za-z_]\w*)\s*\((?:[^()]|\([^()]*\))*\)\s*;\s*$")
+AI_SERVICE_WINDOW = 60
+
+
+def decision_question_hits(lines):
+    """A question typed `noul`, `choice`, or `score` next to its instructions or criteria: the decision API request shape."""
+    return {index for index, line in enumerate(lines)
+            if DECISION_QUESTION.search(line) and nearby(lines, index, QUESTION_FIELD, 3, 3)}
+
+
+def imported_model_hits(lines):
+    """Calls to a function imported from a language identification library, such as `detect` from langdetect."""
+    names = set()
+    for line in lines:
+        match = LANGUAGE_ID_IMPORT.match(line)
+        if match:
+            names.update(n.strip() for n in match.group(1).split(",") if n.strip())
+    if not names:
+        return set()
+    call = re.compile(r"(?<![\w.])(?:" + "|".join(sorted(map(re.escape, names))) + r")\s*\(")
+    return {index for index, line in enumerate(lines)
+            if call.search(line) and not LANGUAGE_ID_IMPORT.match(line) and not FUNC_START.match(line)}
+
+
+def python_word_guard_hits(lines):
+    """`any(word in text.lower() for word in words)`, the Python form of a lowercased keyword guard."""
+    return {index for index, line in enumerate(lines) if PY_WORD_GUARD.search(line)}
+
+
+def ai_service_methods(visible):
+    """{index: name} for bodiless interface methods whose prompt is an `@UserMessage` or `@SystemMessage`
+    annotation, so the framework makes the model call. `visible` has text blocks masked."""
+    out = {}
+    pending = None
+    for index, line in enumerate(visible):
+        if AI_SERVICE_ANNOTATION.match(line):
+            pending = index
+            continue
+        if pending is None:
+            continue
+        if index - pending > AI_SERVICE_WINDOW or line.rstrip().endswith(("{", "}")):
+            pending = None
+            continue
+        match = BODILESS_METHOD.match(line)
+        if match and match.group("name") not in NOT_FUNCTIONS:
+            out[index] = match.group("name")
+            pending = None
+    return out
+
+
 def line_hits(text, wrappers=None):
     lines = split_lines(text)
     phrase_hits = phrase_loop_hits(lines)
     judge_hits = judge_model_hits(lines)
     structured_hits = structured_output_hits(lines)
     fluent_hits = fluent_model_hits(lines)
-    guard_hits = java_word_guard_hits(lines)
+    guard_hits = java_word_guard_hits(lines) | python_word_guard_hits(lines)
+    question_hits = decision_question_hits(lines)
+    imported_hits = imported_model_hits(lines)
+    service_hits = set(ai_service_methods(mask_templates(lines))) if AI_SERVICE_TEXT.search(text) else set()
     found = []
     for number, line in enumerate(lines, 1):
         kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
@@ -846,7 +925,10 @@ def line_hits(text, wrappers=None):
             if "text-rule" not in kinds:
                 kinds.append("text-rule")
             kinds.append("word-guard")
-        if index in judge_hits or index in structured_hits or index in fluent_hits:
+        if index in question_hits and "decision-api" not in kinds:
+            kinds.append("decision-api")
+        if index in judge_hits or index in structured_hits or index in fluent_hits or index in imported_hits \
+                or index in service_hits:
             if "model-call" not in kinds:
                 kinds.append("model-call")
         if label_arg_line(line):
@@ -861,7 +943,19 @@ def line_hits(text, wrappers=None):
 def keep_file(found):
     kinds = {k for _, ks in found for k in ks}
     return bool(kinds & STRONG or "word-guard" in kinds
-                or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex"}))
+                or ("decision-name" in kinds and kinds & {"label-set", "llm-mention", "regex", "embedding", "decision-type"}))
+
+
+CLIENT_CLASS = re.compile(
+    r"^\s*(?:(?:export|default|public|final|abstract|internal|open|sealed|private)\s+)*class\s+(?:\w+(?:::|\.))*"
+    r"(?P<name>[A-Z]\w{2,}Client)\b", re.M)
+CLIENT_KINDS = {"drex", "decision-api", "model-call"}
+
+
+def client_use_pattern(names):
+    """Construction or a class-level call of a learned model client class, such as `JudgeClient.new(...)`."""
+    alt = "|".join(sorted(map(re.escape, names)))
+    return re.compile(r"\b(?:" + alt + r")\s*(?:\.|::)\s*(?:new|call|request\w*|create)\b|\bnew\s+(?:" + alt + r")\s*[(<]")
 
 
 def eligible_wrapper(name):
@@ -942,11 +1036,13 @@ def scan(repo, include_tests=False, groups=None):
 
     The first pass learns wrappers in files that import a model library. Each later layer
     is a public, non-decision function named for a model that calls an already learned
-    wrapper and is defined once, so a decision behind two in-house layers is still listed."""
+    wrapper and is defined once, so a decision behind two in-house layers is still listed.
+    A class named like a client and defined beside a model or decision API call marks
+    the code that constructs or calls it, for languages without a model import."""
     repo = Path(repo)
     listed = list_files(repo)
     rels = prefer_real_paths(repo, [rel for rel in listed if scannable(rel, include_tests)])
-    hits, texts, spans, wrappers, scanned, fallbacks = {}, {}, {}, set(), 0, 0
+    hits, texts, spans, wrappers, clients, scanned, fallbacks = {}, {}, {}, set(), set(), 0, 0
 
     def remember(rel, text, found):
         nonlocal fallbacks
@@ -965,6 +1061,8 @@ def scan(repo, include_tests=False, groups=None):
         if keep_file(found):
             remember(rel, text, normalize_found(found))
             wrappers |= wrapper_names(spans[rel], found, split_lines(text))
+            if {k for _, ks in found for k in ks} & CLIENT_KINDS:
+                clients |= {m.group("name") for m in CLIENT_CLASS.finditer(text)}
     if wrappers:
         indexed = [(rel, set(DEF_NAME.findall(text)), set(LONG_CALL.findall(text)))
                    for rel, text in read_scannable(repo, rels)]
@@ -1001,6 +1099,16 @@ def scan(repo, include_tests=False, groups=None):
                         nxt.add(name)
             pending = nxt
         wrappers = learned
+    if clients:
+        uses = client_use_pattern(clients)
+        combined = re.compile(uses.pattern + (r"|\b(?:" + "|".join(sorted(map(re.escape, wrappers))) + r")\s*\("
+                                              if wrappers else ""))
+        for rel, text in read_scannable(repo, rels):
+            if not uses.search(text):
+                continue
+            found = line_hits(text, combined)
+            if keep_file(found):
+                remember(rel, text, normalize_found(found))
     areas = assign_areas(list(hits))
     by_area = {}
     functions_total = 0

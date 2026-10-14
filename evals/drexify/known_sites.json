@@ -459,6 +459,290 @@
           "function": "PRGenerateLabels._get_prediction"
         }
       ]
+    },
+    {
+      "name": "paperless-ngx",
+      "url": "https://github.com/paperless-ngx/paperless-ngx.git",
+      "commit": "c86c822bc7fb3b5a16dcdd5abe7c725b8ce913c7",
+      "language": "python",
+      "note": "User-configured matching rules (src/documents/matching.py) are not sites: the user picked a fixed rule, and the model option is the classifier.",
+      "sites": [
+        {
+          "path": "src/documents/classifier.py",
+          "line": 620,
+          "function": "DocumentClassifier.predict_correspondent"
+        },
+        {
+          "path": "src/documents/classifier.py",
+          "line": 631,
+          "function": "DocumentClassifier.predict_document_type"
+        },
+        {
+          "path": "src/documents/classifier.py",
+          "line": 642,
+          "function": "DocumentClassifier.predict_tags"
+        },
+        {
+          "path": "src/documents/classifier.py",
+          "line": 663,
+          "function": "DocumentClassifier.predict_storage_path"
+        },
+        {
+          "path": "src/documents/views.py",
+          "line": 1488,
+          "function": "DocumentViewSet.metadata"
+        }
+      ]
+    },
+    {
+      "name": "chatwoot",
+      "url": "https://github.com/chatwoot/chatwoot.git",
+      "commit": "8732dc3ac8048d95c2e48770ba6f45d8420c6cab",
+      "language": "ruby",
+      "note": "Four sites already call another System One provider, not the Drex host, so they are candidates.",
+      "sites": [
+        {
+          "path": "app/services/captain/automation_condition_service.rb",
+          "line": 21,
+          "function": "perform"
+        },
+        {
+          "path": "app/services/captain/conversation_classifier_service.rb",
+          "line": 21,
+          "function": "labels"
+        },
+        {
+          "path": "app/services/captain/conversation_classifier_service.rb",
+          "line": 32,
+          "function": "priority"
+        },
+        {
+          "path": "app/services/csat_template_utility_analysis_service.rb",
+          "line": 51,
+          "function": "rule_based_result"
+        },
+        {
+          "path": "enterprise/app/services/captain/llm/conversation_faq_service.rb",
+          "line": 79,
+          "function": "same_faq"
+        },
+        {
+          "path": "enterprise/app/services/captain/llm/translate_query_service.rb",
+          "line": 37,
+          "function": "query_in_target_language"
+        },
+        {
+          "path": "enterprise/app/services/conversation_monitors/decision_service.rb",
+          "line": 10,
+          "function": "evaluate"
+        },
+        {
+          "path": "enterprise/lib/captain/conversation_completion_service.rb",
+          "line": 14,
+          "function": "perform"
+        },
+        {
+          "path": "lib/integrations/google_translate/detect_language_service.rb",
+          "line": 5,
+          "function": "perform"
+        }
+      ]
+    },
+    {
+      "name": "langfuse",
+      "url": "https://github.com/langfuse/langfuse.git",
+      "commit": "df7df892fe610bda26998e0141f3bd777d0c44ef",
+      "language": "typescript",
+      "note": "Managed evaluator templates are data. The two runners are the sites.",
+      "sites": [
+        {
+          "path": "packages/shared/src/server/evals/decisionModelEvaluatorExecution.ts",
+          "line": 330,
+          "function": "executeDecisionModelEvaluator"
+        },
+        {
+          "path": "packages/shared/src/server/evals/llmEvaluatorExecution.ts",
+          "line": 59,
+          "function": "executeLlmEvaluator"
+        }
+      ]
+    },
+    {
+      "name": "langchain4j",
+      "url": "https://github.com/langchain4j/langchain4j.git",
+      "commit": "8548dc3b5e34a86fd00b56fbaa09c41cbff81506",
+      "language": "java",
+      "note": "Decision-model components take a user-supplied backend. None calls the Drex host.",
+      "sites": [
+        {
+          "path": "langchain4j-agentic-patterns/src/main/java/dev/langchain4j/agentic/patterns/decisionrouter/DecisionRouterPlanner.java",
+          "line": 204,
+          "function": "decide"
+        },
+        {
+          "path": "langchain4j-agentic/src/main/java/dev/langchain4j/agentic/supervisor/ResponseAgent.java",
+          "line": 22,
+          "function": "scoreResponses"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/model/chat/router/DecisionModelChatModelRouter.java",
+          "line": 119,
+          "function": "route"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/model/chat/router/DecisionModelChatModelRouter.java",
+          "line": 144,
+          "function": "routeAsync"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/rag/content/aggregator/ReRankingContentAggregator.java",
+          "line": 121,
+          "function": "aggregateAsync"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/rag/content/aggregator/ReRankingContentAggregator.java",
+          "line": 167,
+          "function": "reRankAndFilter"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/rag/query/router/DecisionModelQueryRouter.java",
+          "line": 132,
+          "function": "route"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/rag/query/router/DecisionModelQueryRouter.java",
+          "line": 141,
+          "function": "routeAsync"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/rag/query/router/LanguageModelQueryRouter.java",
+          "line": 102,
+          "function": "route"
+        },
+        {
+          "path": "langchain4j-core/src/main/java/dev/langchain4j/rag/query/router/LanguageModelQueryRouter.java",
+          "line": 113,
+          "function": "routeAsync"
+        },
+        {
+          "path": "langchain4j-guardrails/src/main/java/dev/langchain4j/guardrails/DecisionModelInputGuardrail.java",
+          "line": 57,
+          "function": "validate"
+        },
+        {
+          "path": "langchain4j-guardrails/src/main/java/dev/langchain4j/guardrails/DecisionModelOutputGuardrail.java",
+          "line": 62,
+          "function": "validate"
+        },
+        {
+          "path": "langchain4j-guardrails/src/main/java/dev/langchain4j/guardrails/MessageModeratorInputGuardrail.java",
+          "line": 55,
+          "function": "validate"
+        },
+        {
+          "path": "langchain4j-guardrails/src/main/java/dev/langchain4j/guardrails/PatternBasedPromptInjectionGuardrail.java",
+          "line": 121,
+          "function": "validate"
+        },
+        {
+          "path": "langchain4j/src/main/java/dev/langchain4j/classification/EmbeddingModelTextClassifier.java",
+          "line": 114,
+          "function": "classifyWithScores"
+        },
+        {
+          "path": "langchain4j/src/main/java/dev/langchain4j/service/DefaultAiServices.java",
+          "line": 1412,
+          "function": "triggerModerationIfNeeded"
+        },
+        {
+          "path": "langchain4j/src/main/java/dev/langchain4j/service/tool/search/decision/DecisionModelToolSelector.java",
+          "line": 75,
+          "function": "select"
+        }
+      ]
+    },
+    {
+      "name": "agno",
+      "url": "https://github.com/agno-agi/agno.git",
+      "commit": "00497422d4a386d93ab3b45c1a11faf42fcc932f",
+      "language": "python",
+      "sites": [
+        {
+          "path": "libs/agno/agno/eval/accuracy.py",
+          "line": 293,
+          "function": "AccuracyEval.evaluate_answer"
+        },
+        {
+          "path": "libs/agno/agno/eval/accuracy.py",
+          "line": 326,
+          "function": "AccuracyEval.aevaluate_answer"
+        },
+        {
+          "path": "libs/agno/agno/eval/agent_as_judge.py",
+          "line": 301,
+          "function": "AgentAsJudgeEval._evaluate"
+        },
+        {
+          "path": "libs/agno/agno/eval/agent_as_judge.py",
+          "line": 358,
+          "function": "AgentAsJudgeEval._aevaluate"
+        },
+        {
+          "path": "libs/agno/agno/guardrails/openai.py",
+          "line": 54,
+          "function": "OpenAIModerationGuardrail.check"
+        },
+        {
+          "path": "libs/agno/agno/guardrails/openai.py",
+          "line": 100,
+          "function": "OpenAIModerationGuardrail.async_check"
+        },
+        {
+          "path": "libs/agno/agno/guardrails/prompt_injection.py",
+          "line": 38,
+          "function": "PromptInjectionGuardrail.check"
+        },
+        {
+          "path": "libs/agno/agno/guardrails/prompt_injection.py",
+          "line": 46,
+          "function": "PromptInjectionGuardrail.async_check"
+        },
+        {
+          "path": "libs/agno/agno/knowledge/knowledge.py",
+          "line": 301,
+          "function": "Knowledge._rerank_documents"
+        },
+        {
+          "path": "libs/agno/agno/knowledge/knowledge.py",
+          "line": 318,
+          "function": "Knowledge._arerank_documents"
+        },
+        {
+          "path": "libs/agno/agno/learn/stores/entity_memory.py",
+          "line": 1328,
+          "function": "EntityMemoryStore._judge_superseded"
+        },
+        {
+          "path": "libs/agno/agno/learn/stores/entity_memory.py",
+          "line": 1376,
+          "function": "EntityMemoryStore._ajudge_superseded"
+        },
+        {
+          "path": "libs/agno/agno/memory/manager.py",
+          "line": 660,
+          "function": "MemoryManager._search_user_memories_agentic"
+        },
+        {
+          "path": "libs/agno/agno/scorer/judge.py",
+          "line": 138,
+          "function": "JudgeScorer.score"
+        },
+        {
+          "path": "libs/agno/agno/scorer/judge.py",
+          "line": 142,
+          "function": "JudgeScorer.ascore"
+        }
+      ]
     }
   ]
 }
