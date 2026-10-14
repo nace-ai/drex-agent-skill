@@ -33,7 +33,8 @@ POINTER = re.compile(r"`(?P<path>[^`\s:]+?(?P<ext>\.[A-Za-z][A-Za-z0-9]*)):(?P<l
 SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
-TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils"}
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils",
+             "e2e", "e2e-tests", "e2e_tests"}
 FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample", "cookbook", "cookbooks"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 MIGRATION_DIRS = {"alembic", "migrations", "flyway"}
@@ -757,11 +758,28 @@ def class_entry(name, model_classes):
     return method in ENTRY_METHODS and cls in model_classes and CLASS_ROLE.search(cls) is not None
 
 
+BOILERPLATE = re.compile(r"^(?:__\w+__|constructor|init|toString|equals|hashCode|close|build|builder|copy|clone|"
+                         r"(?:get|set|with|is|has|to|from)(?:[A-Z_]\w*)?)$")
+SHORT_BODY = 4
+RERANK_CALL = re.compile(r"(?<!new )\b\w*(?:cross.?encoder|re_?rank)\w*(?:\.\w+)*\s*\(", re.I)
+
+
+def mention_only(name, kinds, body):
+    """A rerank word in a constructor, an accessor, or a short body that calls no reranker is configuration,
+    not a ranking. `body` is the function's lines after its first line."""
+    if kinds - {"llm-mention", "decision-name"} != {"rerank"}:
+        return False
+    if BOILERPLATE.match(short(name)):
+        return True
+    return len(body) < SHORT_BODY and not any(RERANK_CALL.search(line) for line in body)
+
+
 def candidate_functions(spans, found, lines):
     """Functions that look like a decision, in line order."""
     found = normalize_found(found)
     helpers = task_output_helpers(spans, lines)
     calls = {(span[0], span[2]): span[3] for span in spans}
+    bodies = {(span[0], span[2]): lines[span[0]:span[1]] for span in spans}
     grouped = by_function(spans, found, lines)
     model_classes = {name.rsplit(".", 1)[0] for (_line, name), kinds in grouped.items()
                      if "." in name and kinds & CLASS_MODEL_KINDS}
@@ -770,6 +788,8 @@ def candidate_functions(spans, found, lines):
             grouped[(start, name)] = set()
     out = []
     for (line, name), kinds in sorted(grouped.items()):
+        if mention_only(name, kinds, bodies.get((line, name), [""] * SHORT_BODY)):
+            continue
         calls_task = bool(calls.get((line, name), ()) & (helpers - {short(name)}))
         if (kinds & FUNCTION_STRONG or (DECISION_NAME.search(name) and kinds & FUNCTION_WEAK)
                 or (PREDICATE_NAME.search(short(name)) and kinds & TEXT_RULE_KINDS)

@@ -1042,6 +1042,35 @@ class DrexifyScriptTests(unittest.TestCase):
         first = whole.getvalue().split("\n", 1)[0]
         self.assertEqual(out.getvalue(), f"{first}\nwrote {whole.getvalue().count(chr(10))} lines to {listing}\n")
 
+    def test_rerank_word_in_accessors_and_short_bodies_is_not_a_candidate(self):
+        text = (
+            "public class RerankRequest {\n"
+            "    public String query() {\n"
+            "        return query;\n"
+            "    }\n\n"
+            "    public String toString() {\n"
+            "        return \"RerankRequest{query=\" + query\n"
+            "            + \", model=\" + model\n"
+            "            + \", documents=\" + documents\n"
+            "            + \"}\";\n"
+            "    }\n\n"
+            "    public String settings() {\n"
+            "        return \"rerank top 5\";\n"
+            "    }\n\n"
+            "    public List<Content> topChunks(List<Content> contents, Query query) {\n"
+            "        return reranker.rerank(contents, query.text());\n"
+            "    }\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("RerankRequest.java", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual([short.rsplit(".", 1)[-1] for short in got], ["topChunks"])
+
+    def test_end_to_end_test_folders_are_skipped(self):
+        for rel in ("e2e/setup/fake-server.js", "e2e-tests/template/agent.ts", "tui/E2E/backend.ts"):
+            self.assertFalse(drexify.scannable(rel, False), rel)
+            self.assertTrue(drexify.scannable(rel, True), rel)
+
     def test_migration_folders_are_skipped_even_with_include_tests(self):
         skipped = (
             "backend/alembic/versions/001_init.py",
