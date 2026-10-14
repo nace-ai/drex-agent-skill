@@ -92,7 +92,7 @@ SIGNALS = (
         r"\bsystem_?one|['\"]noul['\"]|\bdecision_?(?:model|client)\w*\s*\.\s*a?(?:decide|evaluate)\w*\s*\(", re.I)),
     ("decision-type", re.compile(r"\bdecision_?(?:model|client)", re.I)),
     ("model-call", re.compile(
-        r"chat\.completions\.create|messages\.create|responses\.create|generate_content|"
+        r"chat\.completions\.create|(?<!\w)messages\.create(?![!\w])|responses\.create|generate_content|"
         r"\.GenerateContent\s*\(|:generateContent\b|\bGenerateFromSinglePrompt\s*\(|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
         r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"

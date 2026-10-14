@@ -535,6 +535,12 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual([(fn["name"], fn["kinds"]) for fn in got], [("metadata", ["model-call"])])
         self.assertFalse(drexify.line_hits("def metadata(doc):\n    return detect(doc.content)\n"))
 
+    def test_active_record_message_creates_are_not_model_calls(self):
+        self.assertIn("model-call", {k for _n, ks in drexify.line_hits("r = client.messages.create(model=m)\n") for k in ks})
+        for line in ("conversation.messages.create!(content: text)\n",
+                     "copilot_thread.copilot_messages.create!(message: reply)\n"):
+            self.assertNotIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks}, line)
+
     def test_injected_llm_and_judge_agent_calls_are_model_calls(self):
         for line in ("  const response = await params.callLlm({\n", "result = call_llm(prompt)\n",
                      "response = evaluator_agent.run(evaluation_input, stream=False)\n",
