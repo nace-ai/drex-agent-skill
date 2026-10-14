@@ -638,6 +638,44 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertNotIn("app/services/fetcher.rb", files)
         self.assertNotIn("app/clients/http_client.rb", files)
 
+    def test_scan_marks_constructors_of_classes_beside_a_decide_call(self):
+        (self.repo / "guard").mkdir(parents=True)
+        (self.repo / "guard/DecisionChecks.java").write_text(
+            "class DecisionChecks {\n  List<String> failed(String input) {\n"
+            "    return decisionModel.decide(request(input)).failed();\n  }\n}\n")
+        (self.repo / "guard/DecisionResponse.java").write_text(
+            "public class DecisionResponse {\n  String noul() { return \"noul\"; }\n}\n")
+        (self.repo / "guard/InputGuard.java").write_text(
+            "public class InputGuard {\n  InputGuard(Builder b) {\n    this.checks = new DecisionChecks(b.model);\n  }\n}\n")
+        (self.repo / "guard/Reader.java").write_text(
+            "public class Reader {\n  Reader() {\n    this.r = new DecisionResponse();\n  }\n}\n")
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn("guard/InputGuard.java", files)
+        self.assertNotIn("guard/Reader.java", files)
+
+    def test_regex_pattern_lists_run_against_text_are_guards(self):
+        text = (
+            "public Result validate(UserMessage message) {\n"
+            "  String text = message.singleText();\n"
+            "  for (Pattern pattern : patterns) {\n"
+            "    if (pattern.matcher(text).find()) {\n"
+            "      return fatal(pattern.pattern());\n"
+            "    }\n"
+            "  }\n"
+            "  return success();\n"
+            "}\n\n"
+            "def is_injection(text):\n"
+            "    return any(p.search(text) for p in INJECTION_PATTERNS)\n\n"
+            "def redact(text):\n"
+            "    for pattern in SECRET_PATTERNS:\n"
+            "        text = pattern.sub('***', text)\n"
+            "    return text\n"
+        )
+        found = drexify.line_hits(text)
+        guarded = {n for n, ks in found if "word-guard" in ks}
+        self.assertEqual(guarded, {3, 12})
+        self.assertTrue(drexify.keep_file(found))
+
     def test_scan_reads_vue_and_svelte_and_skips_cookbooks(self):
         (self.repo / "web/components").mkdir(parents=True)
         (self.repo / "web/components/Triage.vue").write_text(

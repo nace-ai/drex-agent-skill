@@ -793,16 +793,21 @@ ANCHOR = re.compile(r"(?<![\w.'\"`])judge\s*:|(?<![\w.])structuredOutput\s*:\s*\
                     r"""\btype['"]?\s*(?:=>|[:=])\s*['"](?:noul|choice|score)['"]""")
 
 
+def starts_function(line):
+    match = FUNC_START.match(line)
+    return bool(match) and next(v for v in match.groupdict().values() if v) not in NOT_FUNCTIONS
+
+
 def nearby(lines, index, pattern, before, after):
     """True when `pattern` hits within `before`/`after` lines, without crossing a function start."""
     start = index
     for _ in range(before):
-        if start == 0 or FUNC_START.match(lines[start - 1]):
+        if start == 0 or starts_function(lines[start - 1]):
             break
         start -= 1
     end = index
     for _ in range(after):
-        if end + 1 >= len(lines) or FUNC_START.match(lines[end + 1]):
+        if end + 1 >= len(lines) or starts_function(lines[end + 1]):
             break
         end += 1
     return any(pattern.search(line) for line in lines[start:end + 1])
@@ -882,6 +887,26 @@ def python_word_guard_hits(lines):
     return {index for index, line in enumerate(lines) if PY_WORD_GUARD.search(line)}
 
 
+JAVA_PATTERN_LOOP = re.compile(r"\bfor\s*\(\s*(?:final\s+)?Pattern\s+(\w+)\s*:")
+PY_PATTERN_LOOP = re.compile(r"^\s*for\s+(\w+)\s+in\s+[\w.]*(?:pattern|regex|PATTERN|REGEX)\w*\s*:")
+PATTERN_ANY = re.compile(r"\.anyMatch\(\s*(\w+)\s*->\s*\1\.matcher\(|"
+                         r"\bany\(\s*(\w+)\.(?:search|match|fullmatch)\(.+\)\s+for\s+\2\s+in\s")
+
+
+def pattern_guard_hits(lines):
+    """A list of regex patterns run against one text until one matches, the regex form of a keyword guard."""
+    hits = {index for index, line in enumerate(lines) if PATTERN_ANY.search(line)}
+    for index, line in enumerate(lines):
+        match = JAVA_PATTERN_LOOP.search(line) or PY_PATTERN_LOOP.search(line)
+        if not match:
+            continue
+        var = re.escape(match.group(1))
+        use = re.compile(r"\b" + var + r"\.(?:matcher\([^)]*\)\.(?:find|matches|lookingAt)|search|match|fullmatch)\(")
+        if nearby(lines, index, use, 0, PHRASE_WINDOW):
+            hits.add(index)
+    return hits
+
+
 def ai_service_methods(visible):
     """{index: name} for bodiless interface methods whose prompt is an `@UserMessage` or `@SystemMessage`
     annotation, so the framework makes the model call. `visible` has text blocks masked."""
@@ -909,7 +934,7 @@ def line_hits(text, wrappers=None):
     judge_hits = judge_model_hits(lines)
     structured_hits = structured_output_hits(lines)
     fluent_hits = fluent_model_hits(lines)
-    guard_hits = java_word_guard_hits(lines) | python_word_guard_hits(lines)
+    guard_hits = java_word_guard_hits(lines) | python_word_guard_hits(lines) | pattern_guard_hits(lines)
     question_hits = decision_question_hits(lines)
     imported_hits = imported_model_hits(lines)
     service_hits = set(ai_service_methods(mask_templates(lines))) if AI_SERVICE_TEXT.search(text) else set()
@@ -950,6 +975,10 @@ CLIENT_CLASS = re.compile(
     r"^\s*(?:(?:export|default|public|final|abstract|internal|open|sealed|private)\s+)*class\s+(?:\w+(?:::|\.))*"
     r"(?P<name>[A-Z]\w{2,}Client)\b", re.M)
 CLIENT_KINDS = {"drex", "decision-api", "model-call"}
+ANY_CLASS = re.compile(
+    r"^\s*(?:(?:export|default|public|final|abstract|internal|open|sealed|private|protected|static)\s+)*"
+    r"class\s+(?P<name>[A-Z]\w{5,}(?<!Builder)(?<!Mapper)(?<!Request)(?<!Response))\b", re.M)
+DECISION_CALL = re.compile(r"\bdecision_?(?:model|client)\w*\s*\.\s*a?(?:decide|evaluate)\w*\s*\(", re.I)
 
 
 def client_use_pattern(names):
@@ -1037,8 +1066,9 @@ def scan(repo, include_tests=False, groups=None):
     The first pass learns wrappers in files that import a model library. Each later layer
     is a public, non-decision function named for a model that calls an already learned
     wrapper and is defined once, so a decision behind two in-house layers is still listed.
-    A class named like a client and defined beside a model or decision API call marks
-    the code that constructs or calls it, for languages without a model import."""
+    A class named like a client and defined beside a model or decision API call, or any class
+    defined beside a `decisionModel.decide` call, marks the code that constructs or calls it,
+    for languages without a model import."""
     repo = Path(repo)
     listed = list_files(repo)
     rels = prefer_real_paths(repo, [rel for rel in listed if scannable(rel, include_tests)])
@@ -1061,8 +1091,11 @@ def scan(repo, include_tests=False, groups=None):
         if keep_file(found):
             remember(rel, text, normalize_found(found))
             wrappers |= wrapper_names(spans[rel], found, split_lines(text))
-            if {k for _, ks in found for k in ks} & CLIENT_KINDS:
+            file_kinds = {k for _, ks in found for k in ks}
+            if file_kinds & CLIENT_KINDS:
                 clients |= {m.group("name") for m in CLIENT_CLASS.finditer(text)}
+            if "decision-api" in file_kinds and DECISION_CALL.search(text):
+                clients |= {m.group("name") for m in ANY_CLASS.finditer(text)}
     if wrappers:
         indexed = [(rel, set(DEF_NAME.findall(text)), set(LONG_CALL.findall(text)))
                    for rel, text in read_scannable(repo, rels)]
