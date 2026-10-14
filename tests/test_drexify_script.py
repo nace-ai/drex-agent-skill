@@ -245,6 +245,61 @@ class DrexifyScriptTests(unittest.TestCase):
                      "func (m *Model) GenerateContent(ctx context.Context, mc []Message) error {"):
             self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
 
+    def test_go_csharp_and_php_sdk_calls_are_model_calls(self):
+        for line in ("resp, err := client.Chat.Completions.New(ctx, params)",
+                     "msg, err := client.Messages.New(ctx, anthropic.MessageNewParams{})",
+                     "resp, err := c.CreateChatCompletion(ctx, req)",
+                     "stream, berr := b.client.ChatCompletionStreamRequest(ctx, req)",
+                     "out, err := bot.LLM().ChatCompletionNoStream(ctx, request)",
+                     "var response = await chatClient.CompleteChatAsync(messages, options);",
+                     "var result = await chatCompletion.GetChatCompletionsAsync(agent, dialogs);",
+                     "var reply = await service.GetChatMessageContentAsync(history);",
+                     "$answer = $this->client->chat()->create($args);",
+                     "$text = $this->chat->generateText($prompt);",
+                     "prediction = await self.ai_handler.chat_completion(model=model, system=system)",
+                     "var prob = _model.predict(vector).numpy();",
+                     "$response = $this->classifier->askQuestions($query, $this->questions);",
+                     "$out = $this->llm->generate($prompt);"):
+            self.assertIn("model-call", drexify.line_hits(line)[0][1], line)
+        for line in ("func (b *LLM) ChatCompletionNoStream(ctx context.Context, request llm.CompletionRequest) (string, error) {",
+                     "public async Task<bool> GetChatCompletionsAsync(Agent agent, List<RoleDialogModel> dialogs)",
+                     "type ChatCompletionRequest struct {}"):
+            self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
+
+    def test_php_case_insensitive_contains_is_a_text_rule(self):
+        for line in ("if (stripos(mb_strtolower($candidate), mb_strtolower($indicator)) !== false) {",
+                     "if (str_contains(strtolower($text), 'refund')) {"):
+            self.assertIn("text-rule", drexify.line_hits(line)[0][1], line)
+
+    def test_csharp_methods_with_the_brace_on_the_next_line_are_functions(self):
+        text = (
+            "namespace Bots;\n"
+            "public class Router\n"
+            "{\n"
+            "    public Router(IServiceProvider services) : base(services)\n"
+            "    {\n"
+            "    }\n\n"
+            "    public async Task<string> PickAgent(List<RoleDialogModel> dialogs, Func<string, Task> onDone)\n"
+            "    {\n"
+            "        foreach (var d in dialogs)\n"
+            "        {\n"
+            "            Log(d);\n"
+            "        }\n"
+            "        var reply = await chatClient.CompleteChatAsync(messages);\n"
+            "        return reply.Value.Content[0].Text;\n"
+            "    }\n\n"
+            "    private static T Parse<T>(\n"
+            "        string text,\n"
+            "        bool strict)\n"
+            "    {\n"
+            "        return default;\n"
+            "    }\n"
+            "}\n"
+        )
+        spans, _parsed = drexify.file_spans("src/Router.cs", text)
+        self.assertEqual([(s[0], s[1], s[2]) for s in spans],
+                         [(4, 6, "Router"), (8, 16, "PickAgent"), (18, 23, "Parse")])
+
     def test_framework_llm_objects_are_model_calls(self):
         for line in ("response = self.llm.call(prompt)", "out = await llm_instance.ainvoke(messages)",
                      "r = self._llm.call([m])", "await this.llm.chat(messages)", "chat_model.invoke(x)"):

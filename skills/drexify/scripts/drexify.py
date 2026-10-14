@@ -75,6 +75,12 @@ FUNC_START = re.compile(
     r"|(?:(?:public|private|protected|static|async|override|internal)\s+)+(?:" + TYPE_TOKEN + r")?"
     r"(?P<open>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$"
     r")")
+# C# and Allman-style Java put the body brace on the next line. A modifier or return type is required,
+# so a call followed by a block is not read as a method.
+NEXT_LINE_SIGNATURE = re.compile(
+    r"^\s*(?P<pre>" + MODIFIERS + r"(?:" + TYPE_TOKEN + r")?)(?P<name>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*"
+    r"\((?:[^()]|\([^()]*\))*\)\s*(?::\s*(?:base|this)\s*\(.*\)|where\s+[^{;]+|throws\s+[\w., ]+)?\s*$")
+BRACE_LINE = re.compile(r"^\s*\{\s*$")
 OPEN_SIGNATURE = re.compile(r"^\s*" + MODIFIERS + r"(?:\*\s*)?(?P<name>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$")
 SIGNATURE_CLOSE = re.compile(r"^\s*\)\s*(?::\s*[^{=;]+)?\s*\{\s*$")
 ARROW_OPEN = re.compile(
@@ -98,13 +104,18 @@ SIGNALS = (
         r"chat\.completions\.create|(?<!\w)messages\.create(?![!\w])|responses\.create|generate_content|"
         r"\.GenerateContent\s*\(|:generateContent\b|\bGenerateFromSinglePrompt\s*\(|"
         r"with_structured_output|response_format|\bjson_schema\b|\bacompletion\(|litellm\.|\.chat\.complete|"
-        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*\.\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"
-        r"\b\w*classifier\w*\s*\.\s*(?:decide|classify|predict)\s*\(|"
+        r"\b\w*(?:llm|chat_model|chatmodel)\w*\s*(?:\.|->)\s*a?(?:call|invoke|predict|generate|complete|chat|stream)\s*\(|"
+        r"\b\w*classifier\w*\s*(?:\.|->)\s*(?:decide|classify|predict|ask\w*)\s*\(|\b_?model\s*(?:\.|->)\s*predict\s*\(|"
         r"\b(?:a?call|invoke|ask|query)_?(?:llm|chat_?model|language_?model)\s*\(|"
         r"\b\w*(?:judge|evaluator|grader)\w*\s*\.\s*a?run\s*\(|\b\w*model\w*\s*\.\s*a?response\s*\(|"
         r"\bmoderations\.create\s*\(|\.\s*a?moderate\s*\(|/v1/moderations\b|\.predict_proba\s*\(|\.decision_function\s*\(|"
         r"\bdetect_langs?\s*\(|\bNNetLanguageIdentifier\b|\.detect_language\s*\(|"
-        r"new Sentiment\(|sentiment\.analyze\s*\(|SentimentIntensityAnalyzer\(|\bTextBlob\(", re.I)),
+        r"new Sentiment\(|sentiment\.analyze\s*\(|SentimentIntensityAnalyzer\(|\bTextBlob\(|"
+        r"\.(?:Chat\.Completions|Messages|Responses)\.New(?:Streaming)?\s*\(|\bCreateChatCompletion(?:Stream)?\s*\(|"
+        r"\.ChatCompletion(?:Stream)?Request\s*\(|\.chat_?completion(?:_?no_?stream|_?async)?\s*\(|"
+        r"\.CompleteChat(?:Streaming)?(?:Async)?\s*\(|\.GetChatCompletions?(?:Streaming)?(?:Async)?\s*\(|"
+        r"\.GetChatMessageContents?Async\s*\(|->(?:chat|completions|messages|moderations)\(\)->create\w*\s*\(|"
+        r"\bgenerate(?:Text|Object)\s*\(", re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
     ("model-import", re.compile(
         r"^\s*(?:from|import)\s+(?:openai|anthropic|google\.genai|google\.generativeai|vertexai|litellm|langchain\w*|"
@@ -123,7 +134,7 @@ SIGNALS = (
                              r"\bstrings\.ToLower\([^)]*\)\s*(?:==|!=)|\bstrings\.(?:Contains|HasPrefix|HasSuffix)\(strings\.ToLower|"
                              r"\bstrings\.EqualFold\(|\.equalsIgnoreCase\(|"
                              r"\.some\(\s*\(?\w+\)?\s*=>\s*[\w.()]+\.(?:startsWith|endsWith|includes)\(|"
-                             r"\.some\(\s*\(?\w+\)?\s*=>\s*\w+\.test\s*\(")),
+                             r"\.some\(\s*\(?\w+\)?\s*=>\s*\w+\.test\s*\(|\bstripos\(|\bstr_contains\(\s*(?:mb_)?strtolower\(")),
 )
 # Own kind, not a model call, so wrapper learning stays unchanged. Case-sensitive: ignore-case
 # would treat `output_json = answer...` as a schema argument.
@@ -301,11 +312,16 @@ def python_spans(text):
         return None
 
 
+def next_line_opens(lines, index):
+    return index < len(lines) and BRACE_LINE.match(lines[index]) is not None
+
+
 def signature_closes(lines, number):
     """True when a parameter list opened on line `number` closes with `) {` before any statement ends,
     which separates a multi-line method signature from a multi-line call."""
-    for line in lines[number:number + 15]:
-        if SIGNATURE_CLOSE.match(line):
+    for i in range(number, min(number + 15, len(lines))):
+        line = lines[i]
+        if SIGNATURE_CLOSE.match(line) or (line.rstrip().endswith(")") and next_line_opens(lines, i + 1)):
             return True
         if line.rstrip().endswith((";", "}")) or line.strip().startswith(")"):
             return False
@@ -522,8 +538,11 @@ def generic_starts(lines):
     starts = []
     for number, line in enumerate(visible, 1):
         match = FUNC_START.match(line)
+        next_line = NEXT_LINE_SIGNATURE.match(line) if not match else None
         if match:
             name = next(v for v in match.groupdict().values() if v)
+        elif next_line and next_line.group("pre").strip() and next_line_opens(visible, number):
+            name = next_line.group("name")
         else:
             opened = OPEN_SIGNATURE.match(line)
             if opened and signature_closes(visible, number):
