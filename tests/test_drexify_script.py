@@ -638,6 +638,29 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertNotIn("app/services/fetcher.rb", files)
         self.assertNotIn("app/clients/http_client.rb", files)
 
+    def test_ruby_methods_end_at_their_own_end_not_at_a_hash_brace(self):
+        text = (
+            "module Moderation\n"
+            "  def self.perform_scan!(post, user: nil)\n"
+            "    opts = { post_id: post.id, user: user }\n"
+            "    result = bot.reply(context(opts))\n"
+            "    result.include?(\"SPAM\")\n"
+            "  end\n\n"
+            "  def label_for(x) = x.downcase\n\n"
+            "  def other\n"
+            "    [1, 2].map { |n| n * 2 }\n"
+            "  end\n"
+            "end\n"
+        )
+        spans, parsed = drexify.file_spans("lib/spam_scanner.rb", text)
+        self.assertTrue(parsed)
+        self.assertEqual([(s[0], s[1], s[2]) for s in spans], [(2, 6, "perform_scan"), (8, 8, "label_for"), (10, 12, "other")])
+        self.assertIn("reply", spans[0][3])
+
+    def test_moderation_endpoint_url_is_a_model_call(self):
+        line = "const url = process.env.PROXY || 'https://api.openai.com/v1/moderations';\n"
+        self.assertIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks})
+
     def test_scan_marks_constructors_of_classes_beside_a_decide_call(self):
         (self.repo / "guard").mkdir(parents=True)
         (self.repo / "guard/DecisionChecks.java").write_text(

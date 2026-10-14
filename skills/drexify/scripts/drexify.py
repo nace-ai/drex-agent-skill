@@ -99,7 +99,7 @@ SIGNALS = (
         r"\b\w*classifier\w*\s*\.\s*(?:decide|classify|predict)\s*\(|"
         r"\b(?:a?call|invoke|ask|query)_?(?:llm|chat_?model|language_?model)\s*\(|"
         r"\b\w*(?:judge|evaluator|grader)\w*\s*\.\s*a?run\s*\(|\b\w*model\w*\s*\.\s*a?response\s*\(|"
-        r"\bmoderations\.create\s*\(|\.\s*a?moderate\s*\(|\.predict_proba\s*\(|\.decision_function\s*\(|"
+        r"\bmoderations\.create\s*\(|\.\s*a?moderate\s*\(|/v1/moderations\b|\.predict_proba\s*\(|\.decision_function\s*\(|"
         r"\bdetect_langs?\s*\(|\bNNetLanguageIdentifier\b|\.detect_language\s*\(|"
         r"new Sentiment\(|sentiment\.analyze\s*\(|SentimentIntensityAnalyzer\(|\bTextBlob\(", re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
@@ -595,6 +595,30 @@ def split_lines(text):
     return lines
 
 
+RUBY_DEF = re.compile(r"^(?P<indent>\s*)(?:(?:private|protected|public|module_function)\s+)?def\s+(?:self\.)?"
+                      r"(?P<name>[A-Za-z_]\w*[!?=]?)")
+RUBY_ENDLESS = re.compile(r"^\s*(?:(?:private|protected|public)\s+)?def\s+[\w.]+[!?]?(?:\([^)]*\))?\s*=(?!=)")
+
+
+def ruby_spans(lines):
+    """Ruby methods run from `def` to the `end` at the same indent. Braces open hashes and blocks, not bodies."""
+    starts = []
+    for number, line in enumerate(lines, 1):
+        match = RUBY_DEF.match(line)
+        if match:
+            starts.append((number, match.group("name").rstrip("!?="), len(match.group("indent").expandtabs())))
+    spans = []
+    for index, (line, name, indent) in enumerate(starts):
+        end = line
+        if not RUBY_ENDLESS.match(lines[line - 1]):
+            closer = re.compile(r"^\s{%d}end\b" % indent)
+            end = next((i for i in range(line, len(lines)) if closer.match(lines[i].expandtabs())), None)
+            end = end + 1 if end is not None else (starts[index + 1][0] - 1 if index + 1 < len(starts) else len(lines))
+        body = "\n".join(lines[line - 1:end])
+        spans.append((line, end, name, set(CALL_NAME.findall(STRING_OR_COMMENT.sub(" ", body))) - NOT_FUNCTIONS))
+    return spans
+
+
 def file_spans(rel, text):
     """(spans, parsed) where parsed is False when a Python file fell back to the generic finder."""
     if rel.endswith(".py"):
@@ -602,6 +626,8 @@ def file_spans(rel, text):
         if spans is not None:
             return spans, True
         return generic_spans(split_lines(text)), False
+    if rel.endswith(".rb"):
+        return ruby_spans(split_lines(text)), True
     return generic_spans(split_lines(text)), True
 
 
