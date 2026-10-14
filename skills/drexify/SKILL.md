@@ -94,7 +94,7 @@ Your repo has been scanned. Identified 5 sites of drexification (1 already on Dr
 Checked 61 of 61 candidate functions: 4 sites, 22 callers, wrappers, or backends, 34 not decisions, 1 dead. Opened 12 of 12 files without one and looked around the candidates: 1 more site. 5 site lines in total. Read `src/ingest`, `src/search`, `src/tasks`, and `src/policy` in depth.
 ```
 
-With one site, write `1 site`, `1 candidate`, and `1 site line in total`. `check` accepts both forms.
+With one site, write `1 site`, `1 candidate`, and `1 site line in total`. A bucket of one can read `1 caller, wrapper, or backend` or `1 not a decision`. `check` accepts both forms.
 
 - Each site line is `- <process> (`<path:line>`): <status>, <shape>, <short note>.` The pointer is the first line of the decision function, its `def` or signature line. A class line is allowed when the class itself is the decision.
 - Write every pointer as a full path from the repository root, even when it repeats a heading. Do not shorten with `...`, brace groups, or bare filenames.

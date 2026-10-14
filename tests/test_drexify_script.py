@@ -1083,6 +1083,18 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual(full["problems"], [])
         self.assertFalse(any("no buckets" in w for w in full["warnings"]))
 
+    def test_check_counts_singular_coverage_buckets(self):
+        listed = ("Identified 1 site of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n"
+                  "- Route (`services/search/app/route.py:1`): candidate.\n\n")
+        coverage = ("Checked 3 of 3 candidate functions: 1 site, 1 caller, wrapper, or backend, 1 not a decision, "
+                    "0 dead. Opened 0 of 0 files without one and looked around the candidates: 0 more sites. "
+                    "1 site line in total.\n")
+        result = drexify.check(self.report(listed + coverage), self.repo)
+        self.assertEqual(result["problems"], [])
+        self.assertFalse(any("no buckets" in w for w in result["warnings"]))
+        wrong = drexify.check(self.report(listed + coverage.replace("Checked 3 of 3", "Checked 4 of 4")), self.repo)
+        self.assertIn("coverage buckets sum to 3, not the 4 candidate functions checked", wrong["problems"])
+
     def test_scan_out_writes_the_listing_and_prints_its_first_line(self):
         saved, listing = Path(self.tmp.name) / "map.json", Path(self.tmp.name) / "group.txt"
         with redirect_stdout(io.StringIO()):
