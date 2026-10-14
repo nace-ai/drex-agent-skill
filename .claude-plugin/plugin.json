@@ -1,6 +1,6 @@
 {
   "name": "drex",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Integrate Drex with coding agents, with an install-time option to make Drex the default decision model.",
   "author": {
     "name": "Nace AI",

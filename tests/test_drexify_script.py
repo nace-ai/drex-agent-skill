@@ -61,7 +61,7 @@ class DrexifyScriptTests(unittest.TestCase):
         match = next(f for f in result["areas"]["services/billing"]["files"] if f["path"].endswith("match.py"))
         self.assertEqual(match["kinds"], ["decision-name", "model-call", "model-import"])
         drex = next(f for f in result["areas"]["services/search"]["files"] if f["path"].endswith("drex_call.py"))
-        self.assertEqual(drex["kinds"], ["drex"])
+        self.assertEqual(drex["kinds"], ["decision-api", "drex"])
         self.assertIn("services/billing/tests/test_match.py",
                       {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]})
 
@@ -507,6 +507,215 @@ class DrexifyScriptTests(unittest.TestCase):
     def test_official_sdk_counts_as_drex(self):
         self.assertIn("drex", drexify.line_hits("from nace_sdk import NaceClient")[0][1])
 
+    def test_decision_api_shape_is_separate_from_the_drex_host(self):
+        def kinds(line):
+            return {k for _n, ks in drexify.line_hits(line) for k in ks}
+
+        self.assertEqual(kinds("URL = 'https://drex.nace.ai/v1/systemone'\n") & {"drex", "decision-api"},
+                         {"drex", "decision-api"})
+        for line in ("SYSTEM_ONE_PATH = '/v1/systemone'.freeze\n", "url = 'https://openrouter.ai/api/v1/systemone'\n",
+                     "p = answers[key]['noul']\n", "return decisionModel.decide(request);\n",
+                     "source = this.decisionModel.decideAsync(toRequest(query));\n"):
+            self.assertIn("decision-api", kinds(line), line)
+            self.assertNotIn("drex", kinds(line), line)
+        self.assertEqual(kinds("  client: DecisionModelClient;\n") & {"decision-api", "decision-type"}, {"decision-type"})
+        question = "answer = ask(\n  priority: {\n    type: 'choice',\n    instructions: 'How urgent is it?',\n  }\n)\n"
+        self.assertIn("decision-api", {k for _n, ks in drexify.line_hits(question) for k in ks})
+        self.assertNotIn("decision-api", kinds("field = { type: 'choice', label: 'Color' }\n"))
+
+    def test_moderation_language_id_and_class_probabilities_are_model_calls(self):
+        for line in ("response = client.moderations.create(model=m, input=x)\n", "return moderationModel.moderate(text);\n",
+                     "        .moderate(messagesToModerate)\n", "probas = classifier.predict_proba(X)[0]\n",
+                     "detector = CLD3::NNetLanguageIdentifier.new(0, 1000)\n",
+                     "response = client.detect_language(content: text)\n", "langs = detect_langs(text)\n"):
+            self.assertIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks}, line)
+        text = "from langdetect import detect\n\ndef metadata(doc):\n    lang = detect(doc.content)\n    return lang\n"
+        spans, _ = drexify.file_spans("views.py", text)
+        got = drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())
+        self.assertEqual([(fn["name"], fn["kinds"]) for fn in got], [("metadata", ["model-call"])])
+        self.assertFalse(drexify.line_hits("def metadata(doc):\n    return detect(doc.content)\n"))
+
+    def test_active_record_message_creates_are_not_model_calls(self):
+        self.assertIn("model-call", {k for _n, ks in drexify.line_hits("r = client.messages.create(model=m)\n") for k in ks})
+        for line in ("conversation.messages.create!(content: text)\n",
+                     "copilot_thread.copilot_messages.create!(message: reply)\n"):
+            self.assertNotIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks}, line)
+
+    def test_injected_llm_and_judge_agent_calls_are_model_calls(self):
+        for line in ("  const response = await params.callLlm({\n", "result = call_llm(prompt)\n",
+                     "response = evaluator_agent.run(evaluation_input, stream=False)\n",
+                     "response = await self._evaluator.arun(prompt, stream=False)\n",
+                     "model_copy.response(messages=m, tools=[func])\n"):
+            self.assertIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks}, line)
+        for line in ("  callLlm: (params: Params) => Promise<unknown>;\n", "result = scorer.run(item)\n",
+                     "team.run(task)\n"):
+            self.assertNotIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks}, line)
+
+    def test_lowercased_keyword_any_is_a_python_word_guard(self):
+        text = (
+            "class PromptInjectionGuardrail:\n"
+            "    def check(self, run_input):\n"
+            "        if any(keyword in run_input.input_content_string().lower() for keyword in self.patterns):\n"
+            "            raise InputCheckError('blocked')\n\n"
+            "    def tags(self, text):\n"
+            "        return any(tag in text for tag in self.tags)\n"
+        )
+        spans, _ = drexify.file_spans("prompt_injection.py", text)
+        found = drexify.line_hits(text)
+        got = {fn["name"]: fn["kinds"] for fn in drexify.candidate_functions(spans, found, text.splitlines())}
+        self.assertEqual(list(got), ["PromptInjectionGuardrail.check"])
+        self.assertIn("word-guard", got["PromptInjectionGuardrail.check"])
+        self.assertTrue(drexify.keep_file(found))
+
+    def test_annotated_ai_service_methods_are_model_calls(self):
+        text = (
+            "public interface ResponseAgent {\n"
+            "\n"
+            "    @UserMessage(\"\"\"\n"
+            "           Score the two responses for the request.\n"
+            "           int x = compute(y);\n"
+            "           \"\"\")\n"
+            "    ResponseScore scoreResponses(@V(\"request\") String request, @V(\"response1\") String response1);\n"
+            "\n"
+            "    String plain(String text);\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("ResponseAgent.java", text)
+        self.assertEqual([(s[0], s[1], s[2]) for s in spans], [(7, 7, "scoreResponses")])
+        found = drexify.line_hits(text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, found, text.splitlines())]
+        self.assertEqual(got, ["scoreResponses"])
+        self.assertTrue(drexify.keep_file(found))
+        self.assertEqual(drexify.generic_spans(["interface A {", "    String plain(String text);", "}"]), [])
+
+    def test_embedding_similarity_promotes_only_decision_named_functions(self):
+        text = (
+            "public ClassificationResult<L> classifyWithScores(String text) {\n"
+            "    Embedding textEmbedding = embeddingModel.embed(text).content();\n"
+            "    double s = CosineSimilarity.between(textEmbedding, example);\n"
+            "    return result(s);\n"
+            "}\n\n"
+            "public void storeAll(List<String> texts) {\n"
+            "    store.addAll(embeddingModel.embed(texts).content());\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("EmbeddingModelTextClassifier.java", text)
+        found = drexify.line_hits(text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, found, text.splitlines())]
+        self.assertEqual(got, ["classifyWithScores"])
+
+    def test_class_probability_helper_promotes_decision_named_callers(self):
+        text = (
+            "def _predict_with_threshold(model, X, threshold):\n"
+            "    probas = model.predict_proba(X)[0]\n"
+            "    return probas.argmax()\n\n"
+            "class DocumentClassifier:\n"
+            "    def predict_correspondent(self, content):\n"
+            "        return _predict_with_threshold(self.correspondent_model, content, 0.5)\n\n"
+            "class Loader:\n"
+            "    def warm_up(self, content):\n"
+            "        return _predict_with_threshold(self.model, content, 0.5)\n"
+        )
+        spans, _ = drexify.file_spans("classifier.py", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual(got, ["_predict_with_threshold", "DocumentClassifier.predict_correspondent"])
+
+    def test_scan_marks_callers_of_learned_model_client_classes(self):
+        (self.repo / "app/clients").mkdir(parents=True)
+        (self.repo / "app/clients/judge_client.rb").write_text(
+            "class Captain::JudgeClient\n  PATH = '/v1/systemone'.freeze\n\n  def call(body:)\n    post(PATH, body)\n  end\nend\n")
+        (self.repo / "app/clients/http_client.rb").write_text(
+            "class Internal::HttpClient\n  def get(url)\n    fetch(url)\n  end\nend\n")
+        (self.repo / "app/services").mkdir(parents=True)
+        (self.repo / "app/services/conditions.rb").write_text(
+            "class Conditions\n  def ask(questions)\n    Captain::JudgeClient.new(id: 1).call(body: questions)\n  end\nend\n")
+        (self.repo / "app/services/fetcher.rb").write_text(
+            "class Fetcher\n  def load(url)\n    Internal::HttpClient.new.get(url)\n  end\nend\n")
+        result = drexify.scan(self.repo)
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual([(fn["name"], fn["kinds"]) for fn in files["app/services/conditions.rb"]["functions"]],
+                         [("ask", ["wrapper-call"])])
+        self.assertNotIn("app/services/fetcher.rb", files)
+        self.assertNotIn("app/clients/http_client.rb", files)
+
+    def test_ruby_methods_end_at_their_own_end_not_at_a_hash_brace(self):
+        text = (
+            "module Moderation\n"
+            "  def self.perform_scan!(post, user: nil)\n"
+            "    opts = { post_id: post.id, user: user }\n"
+            "    result = bot.reply(context(opts))\n"
+            "    result.include?(\"SPAM\")\n"
+            "  end\n\n"
+            "  def label_for(x) = x.downcase\n\n"
+            "  def other\n"
+            "    [1, 2].map { |n| n * 2 }\n"
+            "  end\n"
+            "end\n"
+        )
+        spans, parsed = drexify.file_spans("lib/spam_scanner.rb", text)
+        self.assertTrue(parsed)
+        self.assertEqual([(s[0], s[1], s[2]) for s in spans], [(2, 6, "perform_scan"), (8, 8, "label_for"), (10, 12, "other")])
+        self.assertIn("reply", spans[0][3])
+
+    def test_moderation_endpoint_url_is_a_model_call(self):
+        line = "const url = process.env.PROXY || 'https://api.openai.com/v1/moderations';\n"
+        self.assertIn("model-call", {k for _n, ks in drexify.line_hits(line) for k in ks})
+
+    def test_scan_marks_constructors_of_classes_beside_a_decide_call(self):
+        (self.repo / "guard").mkdir(parents=True)
+        (self.repo / "guard/DecisionChecks.java").write_text(
+            "class DecisionChecks {\n  List<String> failed(String input) {\n"
+            "    return decisionModel.decide(request(input)).failed();\n  }\n}\n")
+        (self.repo / "guard/DecisionResponse.java").write_text(
+            "public class DecisionResponse {\n  String noul() { return \"noul\"; }\n}\n")
+        (self.repo / "guard/InputGuard.java").write_text(
+            "public class InputGuard {\n  InputGuard(Builder b) {\n    this.checks = new DecisionChecks(b.model);\n  }\n}\n")
+        (self.repo / "guard/Reader.java").write_text(
+            "public class Reader {\n  Reader() {\n    this.r = new DecisionResponse();\n  }\n}\n")
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertIn("guard/InputGuard.java", files)
+        self.assertNotIn("guard/Reader.java", files)
+
+    def test_regex_pattern_lists_run_against_text_are_guards(self):
+        text = (
+            "public Result validate(UserMessage message) {\n"
+            "  String text = message.singleText();\n"
+            "  for (Pattern pattern : patterns) {\n"
+            "    if (pattern.matcher(text).find()) {\n"
+            "      return fatal(pattern.pattern());\n"
+            "    }\n"
+            "  }\n"
+            "  return success();\n"
+            "}\n\n"
+            "def is_injection(text):\n"
+            "    return any(p.search(text) for p in INJECTION_PATTERNS)\n\n"
+            "def redact(text):\n"
+            "    for pattern in SECRET_PATTERNS:\n"
+            "        text = pattern.sub('***', text)\n"
+            "    return text\n"
+        )
+        found = drexify.line_hits(text)
+        guarded = {n for n, ks in found if "word-guard" in ks}
+        self.assertEqual(guarded, {3, 12})
+        self.assertTrue(drexify.keep_file(found))
+
+    def test_scan_reads_vue_and_svelte_and_skips_cookbooks(self):
+        (self.repo / "web/components").mkdir(parents=True)
+        (self.repo / "web/components/Triage.vue").write_text(
+            "<script>\nexport function classifyTicket(text) {\n  return client.chat.completions.create({ text });\n}\n"
+            "</script>\n")
+        (self.repo / "web/components/Pick.svelte").write_text(
+            "<script>\n  function routeQuery(q) {\n    return client.chat.completions.create({ q });\n  }\n</script>\n")
+        (self.repo / "cookbook/agents").mkdir(parents=True)
+        (self.repo / "cookbook/agents/judge.py").write_text(
+            "def judge(x):\n    return client.chat.completions.create(model='m')\n")
+        files = {f["path"]: f for a in drexify.scan(self.repo)["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["web/components/Triage.vue"]["functions"]], ["classifyTicket"])
+        self.assertEqual([fn["name"] for fn in files["web/components/Pick.svelte"]["functions"]], ["routeQuery"])
+        self.assertNotIn("cookbook/agents/judge.py", files)
+        self.assertIn("cookbook/agents/judge.py",
+                      {f["path"] for a in drexify.scan(self.repo, include_tests=True)["areas"].values() for f in a["files"]})
+
     def test_check_flags_two_sites_in_one_function_after_snapping(self):
         path = self.report("Identified 2 sites of drexification (0 already on Drex, 0 partial, 0 implemented now, 2 candidates)\n"
                            "- A (`services/billing/app/match.py:3`): candidate.\n"
@@ -851,11 +1060,11 @@ class DrexifyScriptTests(unittest.TestCase):
             "flow.e2e.ts", "parse.bench.js", "foo_test.go", "test_foo.py", "foo_test.py", "foo.test.ts",
             "foo.spec.js", "FooTest.java", "FooTests.java", "FooIT.java", "FooTest.kt", "FooTests.kt",
             "foo_spec.rb", "FooTest.cs", "FooTests.cs", "FooTest.php", "FooSpec.scala", "FooTest.scala",
-            "FooTests.swift", "tests.py",
+            "FooTests.swift", "tests.py", "tests.rs", "Button.stories.tsx", "Form.stories.ts", "page.clienttest.tsx",
         )
         kept = ("latest.ts", "contest.py", "attestation.go", "Testimonial.java", "migration_utils.py",
                 "ab_test.py", "ab_test.ts", "split_test.py", "load_test.py", "stress_test.py", "smoke_test.py",
-                "helper.cjs", "helper.mts", "helper.cts")
+                "helper.cjs", "helper.mts", "helper.cts", "stories.ts", "lib.rs", "Panel.vue", "Panel.svelte")
         for name in skipped + kept:
             self.assertEqual(drexify.is_test_name(name), name in skipped, name)
         for name in skipped + kept:
