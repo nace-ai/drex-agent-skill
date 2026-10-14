@@ -743,6 +743,100 @@
           "function": "JudgeScorer.ascore"
         }
       ]
+    },
+    {
+      "name": "discourse",
+      "url": "https://github.com/discourse/discourse.git",
+      "commit": "c80b0d5c056c0edc49f56ed754b609c7df0aca0a",
+      "language": "ruby",
+      "sites": [
+        {
+          "path": "plugins/discourse-ai/evals/lib/judge.rb",
+          "line": 83,
+          "function": "evaluate"
+        },
+        {
+          "path": "plugins/discourse-ai/evals/lib/judge.rb",
+          "line": 109,
+          "function": "compare"
+        },
+        {
+          "path": "plugins/discourse-ai/evals/lib/runners/inference.rb",
+          "line": 67,
+          "function": "match_concepts"
+        },
+        {
+          "path": "plugins/discourse-ai/evals/lib/runners/spam.rb",
+          "line": 13,
+          "function": "run"
+        },
+        {
+          "path": "plugins/discourse-ai/evals/lib/runners/translation.rb",
+          "line": 68,
+          "function": "detect_locale"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/ai_moderation/spam_scanner.rb",
+          "line": 147,
+          "function": "test_post"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/ai_moderation/spam_scanner.rb",
+          "line": 219,
+          "function": "perform_scan"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/automation/llm_tagger.rb",
+          "line": 6,
+          "function": "handle"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/automation/llm_triage.rb",
+          "line": 72,
+          "function": "handle"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/inferred_concepts/applier.rb",
+          "line": 99,
+          "function": "match_concepts_to_content"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/sentiment/post_classification.rb",
+          "line": 321,
+          "function": "request_with"
+        },
+        {
+          "path": "plugins/discourse-ai/lib/translation/language_detector.rb",
+          "line": 17,
+          "function": "detect"
+        }
+      ]
+    },
+    {
+      "name": "open-webui",
+      "url": "https://github.com/open-webui/open-webui.git",
+      "commit": "f8ae8a6c328946dc62cd0712961a0632574581bf",
+      "language": "python",
+      "sites": [
+        {
+          "path": "backend/open_webui/retrieval/utils.py",
+          "line": 1818,
+          "function": "RerankCompressor.acompress_documents"
+        }
+      ]
+    },
+    {
+      "name": "LibreChat",
+      "url": "https://github.com/LibreChat-AI/LibreChat.git",
+      "commit": "e1dfc10449ff713faffacd60273fddcfe2c0a698",
+      "language": "javascript",
+      "sites": [
+        {
+          "path": "api/server/middleware/moderateText.js",
+          "line": 13,
+          "function": "moderateText"
+        }
+      ]
     }
   ]
 }
