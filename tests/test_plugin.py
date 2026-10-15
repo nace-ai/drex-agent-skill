@@ -107,7 +107,7 @@ class PluginTests(unittest.TestCase):
         plugin, = market["plugins"]
         self.assertEqual(plugin["name"], manifest["name"])
         self.assertEqual(plugin["source"], "./")
-        self.assertEqual(manifest["version"], "0.7.1")
+        self.assertEqual(manifest["version"], "0.8.0")
         self.assertEqual(manifest["repository"], "https://github.com/nace-ai/drex-agent-skills")
 
     def test_github_urls_use_plural_repo(self):
@@ -145,7 +145,12 @@ class PluginTests(unittest.TestCase):
             self.assertNotIn("${", path.read_text(), path.name)
         self.assertIn("## Find the useful workflow", skill)
         self.assertIn('"model": "drex-v2.0"', skill)
-        self.assertIn("reads states up to 8,192 tokens", skill)
+        self.assertIn("reads states up to 131,072 tokens and never hands a request to another model", skill)
+        self.assertNotIn("8,192", skill)
+        for rule in ("Send `DREX_API_KEY` only to `https://drex.nace.ai`", "Compare the response `model` with the pinned id",
+                     "**A task is not a preference:**", "fails closed", "never the same result as a real rejection",
+                     "is not a guardrail", "`console.nace.ai` serves the same API", "a shorter total budget wins"):
+            self.assertIn(rule, skill)
         self.assertIn('models --no-input', skill)
         self.assertNotIn("Examples include `drex-v1.0`", skill)
         self.assertIn("## Design the questions", skill)
