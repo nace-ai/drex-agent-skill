@@ -14,7 +14,8 @@ import urllib.error
 import urllib.request
 
 BASE_URL = "https://drex.nace.ai"
-REQUEST_LIMIT = 1048576
+# Hosted limit on `state` and `questions` serialized together as compact JSON, in UTF-8 bytes.
+REQUEST_LIMIT = 4 * 1048576
 # Raw input may be indented or ASCII-escaped. The hosted limit is enforced on the compact encoding.
 INPUT_LIMIT = 4 * REQUEST_LIMIT
 RESPONSE_LIMIT = 8 * 1048576
@@ -92,7 +93,7 @@ def encode_request(body):
     except (ValueError, TypeError):
         raise HelperError("Request must contain valid, finite JSON values.") from None
     if len(counted) > REQUEST_LIMIT:
-        raise HelperError("Request exceeds the hosted 1 MiB JSON limit.")
+        raise HelperError("Request exceeds the hosted 4 MiB JSON limit.")
     return encoded
 
 
@@ -213,7 +214,7 @@ def load_body(filename):
             with Path(filename).open("rb") as file:
                 raw = file.read(INPUT_LIMIT + 1)
         if len(raw) > INPUT_LIMIT:
-            raise HelperError("Request input exceeds 4 MiB before encoding.")
+            raise HelperError("Request input exceeds 16 MiB before encoding.")
         return json.loads(raw)
     except FileNotFoundError:
         raise HelperError("Request file was not found.") from None
@@ -265,6 +266,10 @@ def main(argv=None):
             key = api_key()
             result = request(key, "/v1/systemone", data)
             validate_response(result, body)
+            if result["model"] != body["model"] and body["model"] != "drex-latest":
+                print("Drex helper: warning: " + result["model"] + " answered, not the requested model. Drex serves "
+                      "retired and unknown drex- ids with another model; pin an id listed by the models command.",
+                      file=sys.stderr)
             # Defend against an accidental exact-key echo even in a successful response.
             print(json.dumps(result, allow_nan=False).replace(key, "[REDACTED]"))
         return 0
