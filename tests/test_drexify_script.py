@@ -216,8 +216,11 @@ class DrexifyScriptTests(unittest.TestCase):
             "def normalize_names(a):\n    return fuzzy_score(a)\n\n"
             "def schema_for(model):\n    return model.model_json_schema()\n\n"
             "def generate_text(p):\n    return _post_json(p)\n")
-        (self.repo / "shared/core/other.py").write_text("def generate_text(p):\n    return p\n")
-        self.assertEqual(drexify.scan(self.repo)["wrappers"], [])
+        (self.repo / "shared/core/other.py").write_text("def generate_text(p):\n    return p\n\ndef reply(p):\n    return generate_text(p)\n")
+        result = drexify.scan(self.repo)
+        self.assertEqual(result["wrappers"], ["llm.generate_text"])
+        paths = {f["path"] for a in result["areas"].values() for f in a["files"]}
+        self.assertNotIn("shared/core/other.py", paths)
 
     def test_decision_functions_inherit_top_level_rule_constants(self):
         (self.repo / "shared/core/cells.py").write_text(
@@ -1134,7 +1137,8 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertEqual([short.rsplit(".", 1)[-1] for short in got], ["topChunks"])
 
     def test_end_to_end_test_folders_are_skipped(self):
-        for rel in ("e2e/setup/fake-server.js", "e2e-tests/template/agent.ts", "tui/E2E/backend.ts"):
+        for rel in ("e2e/setup/fake-server.js", "e2e-tests/template/agent.ts", "tui/E2E/backend.ts",
+                    "src/test-helpers/mock-llm-server.ts", "core/llm/test-utils/openai.ts", "pkg/test_utils/llm.py"):
             self.assertFalse(drexify.scannable(rel, False), rel)
             self.assertTrue(drexify.scannable(rel, True), rel)
 
