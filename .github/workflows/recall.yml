@@ -1,0 +1,45 @@
+name: Scan recall
+
+"on":
+  pull_request:
+    paths:
+      - "skills/drexify/scripts/**"
+      - "evals/drexify/**"
+      - ".github/workflows/recall.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Cache pinned checkouts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/drexify-evals
+          key: drexify-evals-${{ hashFiles('evals/drexify/known_sites.json') }}
+          restore-keys: drexify-evals-
+
+      - name: Measure the base branch
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE"
+          python "$RUNNER_TEMP/base/evals/drexify/recall.py" --known evals/drexify/known_sites.json --json > "$RUNNER_TEMP/base.json"
+
+      - name: Compare this branch
+        run: python evals/drexify/recall.py --baseline "$RUNNER_TEMP/base.json"

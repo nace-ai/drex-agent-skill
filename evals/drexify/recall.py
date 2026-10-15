@@ -11,6 +11,10 @@ candidate counts only. --extra scans a local repo and reports its candidate coun
     python3 evals/drexify/recall.py --cache /tmp/drexify-oss
     python3 evals/drexify/recall.py --repo crewAI --strict
     python3 evals/drexify/recall.py --extra /path/to/repo --json
+    python3 evals/drexify/recall.py --baseline before.json
+
+--baseline compares with an earlier --json report made with the same answer key. It lists
+known sites that report found and this scan misses, and exits 1 when there are any.
 """
 import argparse
 import json
@@ -210,6 +214,33 @@ def print_report(report):
         )
 
 
+def compare(report, path):
+    try:
+        baseline = json.loads(Path(path).read_text(encoding="utf-8"))
+        before = {repo["name"]: repo for repo in baseline["repos"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        raise SystemExit(f"{path} is not a recall --json report")
+    lost = []
+    for repo in report["repos"]:
+        old = before.get(repo["name"])
+        if old is None:
+            print(f"{repo['name']}: not in the baseline")
+            continue
+        missed_before = {(site["path"], site["function"]) for site in old["missing"]}
+        for site in repo["missing"]:
+            if (site["path"], site["function"]) not in missed_before:
+                lost.append(f"{repo['name']} {site['path']}:{site['line']} {site['function']}")
+        change = repo["candidate_functions"] - old["candidate_functions"]
+        if change:
+            print(f"{repo['name']}: candidates {old['candidate_functions']} -> {repo['candidate_functions']} ({change:+d})")
+    old_total, new_total = baseline["total"], report["total"]
+    print(f"recall {old_total['found']} -> {new_total['found']} of {new_total['known']}, "
+          f"candidates {old_total['candidate_functions']} -> {new_total['candidate_functions']}")
+    for site in lost:
+        print(f"  lost {site}")
+    return lost
+
+
 def load_known(path, names):
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -261,14 +292,18 @@ def main(argv=None):
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
     parser.add_argument("--strict", action="store_true", help="exit 1 when any known site is missing")
     parser.add_argument("--extra", action="append", default=[], help="local repo with no answer key (repeatable)")
+    parser.add_argument("--baseline", help="earlier --json report; exit 1 when a site it found is now missing")
     args = parser.parse_args(argv)
+    if args.json and args.baseline:
+        parser.error("--baseline prints a comparison, not JSON")
     report = measure(args)
     if args.json:
         print(json.dumps(report, indent=1))
     else:
         print_report(report)
+    lost = compare(report, args.baseline) if args.baseline else []
     missed = any(repo["missing"] for repo in report["repos"])
-    return 1 if args.strict and missed else 0
+    return 1 if lost or (args.strict and missed) else 0
 
 
 if __name__ == "__main__":

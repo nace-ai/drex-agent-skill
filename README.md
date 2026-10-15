@@ -1,6 +1,8 @@
 # Drex for coding agents
 
-Get a Drex API key, export it once, then install the plugin or skills for your agent. Drex handles System One decisions without changing your coding model.
+[Drex](https://drex.nace.ai/docs) answers System One decisions: a yes or no (`noul`), one pick from a fixed set (`choice`), or a level on an ordered scale (`score`), each with calibrated probabilities. This repository teaches your coding agent to use it. The agent keeps its own model for chat, reasoning, and code. Drex only answers the typed questions the agent or your application sends.
+
+Get a Drex API key, export it once, then install the plugin or skills for your agent.
 
 **Supported agents:** [Claude Code](#claude-code) · [OpenCode](#opencode) · [Hermes Agent](#hermes-agent) · [Codex](#codex) · [Cursor](#cursor) · [Gemini CLI](#gemini-cli) · [GitHub Copilot](#github-copilot) · [Windsurf](#windsurf) · [Cline](#cline) · [OpenClaw](#openclaw) · [Pi](#pi) · [DeepSeek Harness](#deepseek-harness) · [Other harness](#other-harness)
 
@@ -15,6 +17,8 @@ https://github.com/user-attachments/assets/772d46e2-7dad-4833-829e-fa92f8ada038
 
 Install both. `drexify` relies on `drex-for-harness` for question design and API calls. Your agent loads each one automatically when it is relevant.
 
+The skills come with two small scripts that the agent runs for you: a helper that checks your key and sends decision requests to hosted Drex, and a scanner that searches a repository for decision sites locally, without calling a model or the network. The Claude Code plugin bundles both skills and both scripts. Commands, limits, and development notes are in the [reference](docs/reference.md).
+
 ## Export the API key
 
 1. **Get your API key.** Sign in at [drex.nace.ai](https://drex.nace.ai/login), open **API Keys**, create a key, and copy it.
@@ -25,9 +29,11 @@ Install both. `drexify` relies on `drex-for-harness` for question design and API
    export DREX_API_KEY='paste-your-key-here'
    ```
 
-Run your agent from that terminal so it inherits the key.
+Run your agent from that terminal so it inherits the key. After installing, ask the agent to "check my Drex key". It verifies the key without spending credit and says what is wrong if it fails.
 
 ## Install Drex for your agent
+
+These steps were tested end to end for Claude Code (the plugin) and Cursor (personal skills). The other sections follow each agent's documented skill installer and were not run as part of this repository's release checks.
 
 ### Claude Code
 
@@ -175,14 +181,14 @@ Restart OpenClaw after installation to load Drex.
 
 ### Pi
 
-Use Pi's [native Git package installer](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/packages.md):
+Use Pi's [native Git package installer](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md):
 
 ```bash
 pi install git:github.com/nace-ai/drex-agent-skills
 pi list
 ```
 
-Add `-l` to `pi install` for a project-local package. Pi fetches its own checkout and picks up both skills; a separate `git clone` is unnecessary.
+Add `-l` to `pi install` for a project-local package. Pi fetches its own checkout and picks up both skills, so a separate `git clone` is unnecessary.
 
 Restart Pi after installation to load Drex.
 
@@ -214,11 +220,72 @@ Replace `/path/to/your-agent/skills` with the actual directory from your agent's
 
 Restart your agent after installation to load Drex. For cloud agents, configure `DREX_API_KEY` in the agent's supported environment or secrets settings.
 
+## Use it
+
+Ask in plain words. The agent loads the right skill on its own.
+
+| You ask | The agent |
+| --- | --- |
+| "Drexify this repo." | Scans the repository and writes a report: a headline with counts, one line per decision site with a `path:line` pointer and the question shape Drex would answer, and a coverage line. It changes nothing in the repository. |
+| "Drexify this repo and move the ticket router to Drex." | Scans, then changes that one site behind a configuration switch. It compares Drex with the current mechanism on real examples when the current one can run, tests the failure paths, and reports what it changed and measured. |
+| "Use Drex to check which of these 30 emails ask for a refund." | Writes the questions and calls hosted Drex through the helper. |
+| "Add a Drex check before we auto-close a ticket." | Designs the question and writes the integration code with its tests. |
+
+What the agent does and does not do:
+
+- **The default stays yours.** A new Drex path starts switched off, and your existing mechanism stays the default, unless Drex is your default decision provider or you ask to switch.
+- **No silent fallback in default mode.** When Drex is the default and a call fails, new code raises, returns an explicit failure, or uses a documented safe default, and it logs the failure. It does not quietly call another model provider. A switch back to your old mechanism is fine, because a person flips it.
+- **Guardrails fail closed.** When Drex is down, moderation or a permission check blocks instead of letting everything through, and reports an outage, such as HTTP 503, rather than telling the user their content broke a rule. A filter that would turn away real users, such as a spam filter, lets input through with a log line instead.
+- **The key goes only to Drex.** Generated clients send `DREX_API_KEY` only to `https://drex.nace.ai`, never to a self-hosted or other URL.
+- **The answering model is checked.** Drex answers a mistyped or retired model id with another model instead of an error. Generated clients compare the response's `model` with the pinned id, and the helper warns when they differ.
+- **Nothing ships without you.** The agent does not change production routing, credentials, or unrelated code without your authorization, and it reports only what it actually ran.
+
+## Make Drex the default
+
+In Claude Code, the plugin's `make_default` option decides it. The install command above sets it to `true`. With `false`, Drex adds capability and leaves your existing decision providers in charge. To change it, uninstall the plugin and install it again with the other value.
+
+In other agents, installing the skills adds capability only. To make Drex the default, add a line like this to the agent's persistent instructions, such as `AGENTS.md`:
+
+> For System One decisions, use Drex by default and load the drex-for-harness skill. Do not silently switch to another decision provider if Drex is unavailable.
+
+## Data and security
+
+- **The scan stays local.** It reads files and writes only the map and report paths you give it.
+- **Drex sees only what is sent.** A decision request carries a `state` and its questions. The agent puts in it only what the task needs, and the skill tells it not to send private evaluation data as probes.
+- **The key stays in the environment.** Never paste it into chat or source code. The Claude plugin's session hook only adds text to the agent's context. It reads no files or credentials and makes no network calls.
+- **Self-hosted Drex needs no key**, and the hosted key is never sent to it.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `DREX_API_KEY is missing` | Export the key in the terminal that starts the agent. For Cursor opened from the Dock, put the export in `~/.zshrc` or `~/.bashrc` and restart Cursor. |
+| `DREX_API_KEY has an invalid format` | Copy the whole key again. It starts with `nace_sk_`. |
+| `Authentication failed` (401) | The key is wrong or revoked. Create a new one under **API Keys**. |
+| `insufficient credit` (402) | Top up or add a card under **Billing**. The key check still works without credit. |
+| `Drex rejected the request` (422) | The request is invalid or too long. Fix the request instead of retrying it. |
+| Rate limit (429) or unavailable (529) | Wait and retry. Lower the number of requests you send at once. |
+| `warning: drex-v2.0 answered, not the requested model` | The pinned model id is retired or mistyped. Ask the agent to list the current Drex models and pin one of them. |
+| Claude Code says `Not logged in · Please run /login` | Run `/login` in Claude Code, then install again. |
+| The agent does not use Drex | Restart the agent after installing, check that the skill folders are where the agent looks for skills, or ask it to use the drex-for-harness skill by name. |
+
+## Update and uninstall
+
+Claude Code:
+
+```bash
+claude plugin marketplace update nace-ai
+claude plugin update drex@nace-ai
+claude plugin uninstall drex@nace-ai
+```
+
+For agents installed from a clone, update with `git -C "$HOME/drex-agent-skills" pull`. To uninstall, delete the two `drex-for-harness` and `drexify` links from the agent's skill folder, then delete the clone. Restart the agent after either change.
+
 ## Self-hosted Drex
 
 To run the open-source [Drex](https://github.com/nace-ai/drex-decision-models) models yourself instead of using the hosted API, no `DREX_API_KEY` is needed:
 
-1. **Start the server.** Follow the [Runners](https://github.com/nace-ai/drex-decision-models#runners) section of the Drex repository, using any of its runners. Check that it is up: `curl http://127.0.0.1:8000/health` (the default port is 8000; the other runners use 8097 and 11434).
+1. **Start the server.** Follow the [Runners](https://github.com/nace-ai/drex-decision-models#runners) section of the Drex repository, using any of its runners. Check that it is up: `curl http://127.0.0.1:8000/health`. The Drex repository's examples serve on port 8000, and its Ollama build on 11434.
 
 2. **Install the skills** for your agent with the instructions above.
 
@@ -227,3 +294,11 @@ To run the open-source [Drex](https://github.com/nace-ai/drex-decision-models) m
    > For System One decisions, use my self-hosted Drex at http://127.0.0.1:8000. Do not fall back to hosted Drex.
 
 Self-hosted requests use the same `POST /v1/systemone` format as the hosted API, with no `Authorization` header. The bundled helper only talks to hosted Drex, so your agent uses an ordinary HTTP client for your server. Keep the server on `127.0.0.1` unless you add authentication in front of it, and never send a hosted API key to it. See the repository for hardware requirements and license terms.
+
+## Develop
+
+The [reference](docs/reference.md) covers the offline tests, the opt-in Claude Code install test, plugin validation, the scan's recall eval, and the repository layout.
+
+## License
+
+[MIT](LICENSE)

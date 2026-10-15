@@ -18,6 +18,12 @@ import re
 import subprocess
 import sys
 
+try:
+    from re import _constants as RE_CONST, _parser as RE_PARSER
+except ImportError:  # Python 3.9 and 3.10
+    import sre_constants as RE_CONST
+    import sre_parse as RE_PARSER
+
 STATUSES = ("already on Drex", "partial", "implemented now", "candidate")
 HEADLINE = re.compile((
     r"Identified (\d+) sites? of drexification \((\d+) already on Drex, (\d+) partial, "
@@ -34,7 +40,7 @@ SITE_POINTER = re.compile(r"^[^`\s:]+\.[A-Za-z][A-Za-z0-9]*:\d+(?:[-,:]\d+)*$")
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "env", "__pycache__", "dist", "build", "vendor", "third_party",
              "target", ".next", ".nuxt", "coverage", "site-packages", ".mypy_cache", ".pytest_cache", ".tox", ".cache"}
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "testing", "testdata", "testutil", "testutils",
-             "e2e", "e2e-tests", "e2e_tests"}
+             "test-utils", "test_utils", "test-helpers", "test_helpers", "testhelpers", "e2e", "e2e-tests", "e2e_tests"}
 FIXTURE_DIRS = {"fixtures", "__mocks__", "examples", "example", "samples", "sample", "cookbook", "cookbooks"}
 EVAL_DIRS = {"eval", "evals", "evaluation", "evaluations"}
 MIGRATION_DIRS = {"alembic", "migrations", "flyway"}
@@ -72,7 +78,7 @@ FUNC_START = re.compile(
     r"(?:function\b|(?:<[^>]*>)?\s*\((?:[^()]|\([^()]*\))*\)[^=]*=>|\w+\s*=>)"
     r"|(?:(?:get|set)\s+)?(?:\*\s*)?(?:" + TYPE_TOKEN + r")?(?P<method>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*"
     r"\((?:[^()]|\([^()]*\))*\)\s*(?::\s*[^{=;]+)?(?:throws\s+[\w., ]+)?\s*\{\s*$"
-    r"|(?:(?:public|private|protected|static|async|override|internal)\s+)+(?:" + TYPE_TOKEN + r")?"
+    r"|(?:(?:public|private|protected|static|async|override|internal)\s+)+(?:\*\s*)?(?:" + TYPE_TOKEN + r")?"
     r"(?P<open>[A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(\s*$"
     r")")
 # C# and Allman-style Java put the body brace on the next line. A modifier or return type is required,
@@ -94,6 +100,10 @@ ASSIGNED = re.compile(r"^(?P<indent>\s*)(?:(?:export|const|let|var|final|static|
 DEF_NAME = re.compile(r"\b(?:(?:def|function|func|fn|fun)\s+|func\s*\([^)]*\)\s*)(\w+)")
 STRING_OR_COMMENT = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`[^`]*`|//.*$|(?:^|\s)#.*$")
 
+# A raw HTTP client for a model provider: an inference path in a string. A bare provider host is not enough,
+# because model catalogs, settings, and docs name hosts without calling a model.
+MODEL_ENDPOINT_PATTERN = r"""['"`/]chat/completions['"`]|['"`]/(?:v1/)?moderations['"`]|['"`/]v1/messages['"`]"""
+MODEL_ENDPOINT = re.compile(MODEL_ENDPOINT_PATTERN, re.I)
 SIGNALS = (
     ("drex", re.compile(r"\b(drex|nace_sdk|NaceClient)\b|\bnace-sdk\b", re.I)),
     # The decision API shape, on the Drex host or another provider. The host decides the status.
@@ -115,7 +125,7 @@ SIGNALS = (
         r"\.ChatCompletion(?:Stream)?Request\s*\(|\.chat_?completion(?:_?no_?stream|_?async)?\s*\(|"
         r"\.CompleteChat(?:Streaming)?(?:Async)?\s*\(|\.GetChatCompletions?(?:Streaming)?(?:Async)?\s*\(|"
         r"\.GetChatMessageContents?Async\s*\(|->(?:chat|completions|messages|moderations)\(\)->create\w*\s*\(|"
-        r"\bgenerate(?:Text|Object)\s*\(", re.I)),
+        r"\bgenerate(?:Text|Object)\s*\(|" + MODEL_ENDPOINT_PATTERN, re.I)),
     ("decision-name", re.compile(r"\b(?:def|function|func|fn|fun|class)\s+\w*(?:" + DECISION_WORDS + r")\w*", re.I)),
     ("model-import", re.compile(
         r"^\s*(?:from|import)\s+(?:openai|anthropic|google\.genai|google\.generativeai|vertexai|litellm|langchain\w*|"
@@ -149,13 +159,99 @@ LABEL_GROUP = re.compile(
     r"""(?:\s*,\s*['"][A-Za-z_][A-Za-z0-9_]{0,40}['"]){1,12}\s*,?\s*(?:\)|\])""")
 LABEL_SKIP = re.compile(r"\b(?:create_index|Index|Column|ForeignKey|UniqueConstraint)\b")
 WRAPPER_MIN_LEN = 8
+MIN_QUALIFIED_WRAPPER = 3
 WRAPPER_DEPTH = 3
+IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+PY_FROM_IMPORT = re.compile(r"^\s*from\s+(?P<module>[\w.]+)\s+import\s+(?P<names>\([^)]*\)|[^\n#]+)", re.M)
+JS_IMPORT = re.compile(
+    r"""\bimport\s+(?:type\s+)?(?:\w+\s*,\s*)?(?:\*\s*as\s+(?P<namespace>\w+)|\{(?P<names>[^}]*)\})\s*from\s*['"](?P<source>[^'"]+)['"]|"""
+    r"""\b(?:const|let|var)\s*\{(?P<rnames>[^}]*)\}\s*=\s*require\(\s*['"](?P<rsource>[^'"]+)['"]\s*\)""")
 CLIENT_NAME = re.compile(r"model|llm|gpt|completion|converse", re.I)
 WRAPPER_STOP = {"generate", "complete", "completion", "run_sync", "execute", "process", "create", "invoke", "predict",
-                "request", "response", "get_client", "get_model", "from_config", "validate"}
+                "request", "response", "get_client", "get_model", "from_config", "validate", "constructor", "initialize"}
 
 
-ANY_SIGNAL = re.compile("|".join(f"(?:{pattern.pattern})" for _, pattern in SIGNALS), re.I | re.M)
+def top_level_alternatives(pattern):
+    """Split a regex at its top-level `|`, so each branch keeps its own literal-prefix search."""
+    parts, depth, start, i, in_class = [], 0, 0, 0, False
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "\\":
+            i += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "|" and depth == 0:
+            parts.append(pattern[start:i])
+            start = i + 1
+        i += 1
+    return parts + [pattern[start:]]
+
+
+MIN_LITERAL = 3
+# Non-ASCII letters that ignore-case matching folds onto an ASCII letter, which str.lower() does not.
+ASCII_FOLDS = str.maketrans({"\u0130": "i", "\u0131": "i", "\u017f": "s", "\u212a": "k"})
+
+
+def literal_options(items):
+    """Lowercase ASCII strings, one of which every match of the parsed regex `items` contains, or None."""
+    best, run = None, ""
+
+    def close(current, candidate):
+        if candidate and (current is None or min(map(len, candidate)) > min(map(len, current))):
+            return candidate
+        return current
+
+    for op, av in items:
+        if op is RE_CONST.LITERAL and av < 128:
+            run += chr(av)
+            continue
+        if op in (RE_CONST.AT, RE_CONST.ASSERT, RE_CONST.ASSERT_NOT):
+            continue
+        best = close(best, {run.lower()} if len(run) >= MIN_LITERAL else None)
+        run = ""
+        if op is RE_CONST.SUBPATTERN:
+            best = close(best, literal_options(av[-1]))
+        elif op is RE_CONST.BRANCH:
+            options = [literal_options(branch) for branch in av[1]]
+            best = close(best, set().union(*options) if all(options) else None)
+    return close(best, {run.lower()} if len(run) >= MIN_LITERAL else None)
+
+
+class Signal:
+    """A regex with literal strings that a match must contain, checked with fast substring tests first."""
+
+    def __init__(self, pattern, flags):
+        self.regex = re.compile(pattern, flags)
+        self.needles = tuple(literal_options(RE_PARSER.parse(pattern, flags)) or ())
+
+    def search(self, text, folded):
+        if self.needles and not any(needle in folded for needle in self.needles):
+            return None
+        return self.regex.search(text)
+
+
+def folded_text(text):
+    return (text if text.isascii() else text.translate(ASCII_FOLDS)).lower()
+
+
+# One alternation over every signal is slower than its branches behind substring checks.
+ANY_SIGNAL_PARTS = tuple(Signal(part, re.I | re.M) for _, pattern in SIGNALS
+                         for part in top_level_alternatives(pattern.pattern))
+# A line match is also a match in the whole text, so a signal absent from the file is skipped per line.
+SIGNALS_IN_TEXT = tuple((kind, pattern, [Signal(part, pattern.flags | re.M) for part in top_level_alternatives(pattern.pattern)])
+                        for kind, pattern in SIGNALS)
+
+
+def any_signal(text, folded=None):
+    folded = folded_text(text) if folded is None else folded
+    return any(part.search(text, folded) for part in ANY_SIGNAL_PARTS)
 
 
 def list_files(repo):
@@ -533,8 +629,8 @@ def arrow_template_end(lines, start):
     return None
 
 
-def generic_starts(lines):
-    visible = mask_templates(lines)
+def generic_starts(lines, visible=None):
+    visible = mask_templates(lines) if visible is None else visible
     starts = []
     for number, line in enumerate(visible, 1):
         match = FUNC_START.match(line)
@@ -566,7 +662,7 @@ def generic_spans(lines):
     outside the parameter list, so `fn(opts?: { a: string }) {` keeps the whole function.
     An arrow that returns a template ends when that template ends."""
     visible = mask_templates(lines)
-    starts = generic_starts(lines)
+    starts = generic_starts(lines, visible)
     bodiless = set(ai_service_methods(visible)) if any(AI_SERVICE_TEXT.search(line) for line in lines) else set()
     spans = []
     for index, (line, name) in enumerate(starts):
@@ -923,6 +1019,8 @@ DECISION_QUESTION = re.compile(r"""\btype['"]?\s*(?:=>|[:=])\s*['"](?:noul|choic
 QUESTION_FIELD = re.compile(r"\b(?:instructions|criteria)\b")
 LANGUAGE_ID_IMPORT = re.compile(r"^\s*from\s+(?:langdetect|langid|lingua|fast_langdetect|ftlangdetect)\s+import\s+([\w, ]+)")
 PY_WORD_GUARD = re.compile(r"\bany\(\s*(\w+)\s+in\s+\S+?\.lower\(\)\s+for\s+\1\s+in\s")
+PY_LOWERED_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*\S.*\.(?:lower|casefold)\(\)\s*$")
+PY_LOWERED_ANY = re.compile(r"\bany\(\s*(\w+)\s+in\s+([A-Za-z_]\w*)\s+for\s+\1\s+in\s")
 AI_SERVICE_ANNOTATION = re.compile(r"^\s*@(?:UserMessage|SystemMessage)\b")
 AI_SERVICE_TEXT = re.compile(r"@(?:UserMessage|SystemMessage)\b")
 BODILESS_METHOD = re.compile(r"^\s*(?:[\w<>\[\],.?]+\s+)+(?P<name>[A-Za-z_]\w*)\s*\((?:[^()]|\([^()]*\))*\)\s*;\s*$")
@@ -950,8 +1048,20 @@ def imported_model_hits(lines):
 
 
 def python_word_guard_hits(lines):
-    """`any(word in text.lower() for word in words)`, the Python form of a lowercased keyword guard."""
-    return {index for index, line in enumerate(lines) if PY_WORD_GUARD.search(line)}
+    """`any(word in text.lower() for word in words)`, the Python form of a lowercased keyword guard,
+    also when the text was lowercased into a variable a few lines before."""
+    hits, lowered = set(), {}
+    for index, line in enumerate(lines):
+        if PY_WORD_GUARD.search(line):
+            hits.add(index)
+            continue
+        match = PY_LOWERED_ANY.search(line)
+        if match and index - lowered.get(match.group(2), -PHRASE_WINDOW - 1) <= PHRASE_WINDOW:
+            hits.add(index)
+        assigned = PY_LOWERED_ASSIGN.match(line)
+        if assigned:
+            lowered[assigned.group(1)] = index
+    return hits
 
 
 JAVA_PATTERN_LOOP = re.compile(r"\bfor\s*\(\s*(?:final\s+)?Pattern\s+(\w+)\s*:")
@@ -1005,9 +1115,12 @@ def line_hits(text, wrappers=None):
     question_hits = decision_question_hits(lines)
     imported_hits = imported_model_hits(lines)
     service_hits = set(ai_service_methods(mask_templates(lines))) if AI_SERVICE_TEXT.search(text) else set()
+    joined = "\n".join(lines)
+    folded = folded_text(joined)
+    present = [(kind, pattern) for kind, pattern, parts in SIGNALS_IN_TEXT if any(p.search(joined, folded) for p in parts)]
     found = []
     for number, line in enumerate(lines, 1):
-        kinds = [kind for kind, pattern in SIGNALS if pattern.search(line)]
+        kinds = [kind for kind, pattern in present if pattern.search(line)]
         if wrappers is not None and wrappers.search(line) and not FUNC_START.match(line):
             kinds.append("wrapper-call")
         index = number - 1
@@ -1061,17 +1174,75 @@ def eligible_wrapper(name):
             and not name.startswith(("_", "test")) and not DECISION_NAME.search(name))
 
 
+def model_client_file(found, lines):
+    return any("model-import" in kinds for _, kinds in found) or any(MODEL_ENDPOINT.search(line) for line in lines)
+
+
 def wrapper_names(spans, found, lines):
     """The repository's own model client layer: public, non-decision functions in files that import a model
-    library and reach a model call directly or through same-file helpers."""
-    if not any("model-import" in kinds for _, kinds in found):
-        return set()
-    names = set()
+    library or name a provider endpoint, and reach a model call directly or through same-file helpers.
+
+    Returns the names safe to match anywhere, and the short or generic names, such as `ask`, that are
+    matched only through the module, as in `llm.ask(` or after `import { ask } from "./llm"`."""
+    if not model_client_file(found, lines):
+        return set(), set()
+    names, qualified_only = set(), set()
     for (_, qualified), kinds in by_function(spans, found, lines).items():
         name = short(qualified)
-        if kinds & MODEL_REACH and eligible_wrapper(name):
+        if not kinds & MODEL_REACH:
+            continue
+        if eligible_wrapper(name):
             names.add(name)
-    return names
+        elif (len(name) >= MIN_QUALIFIED_WRAPPER and IDENTIFIER.fullmatch(name)
+              and not name.startswith(("_", "test")) and not DECISION_NAME.search(name)):
+            qualified_only.add(name)
+    return names, qualified_only
+
+
+def module_stem(rel):
+    """The name callers use for a module: the file stem, or the folder of an `__init__` or `index` file."""
+    path = Path(rel)
+    stem = path.stem if path.stem not in ("__init__", "index", "mod") else path.parent.name
+    return stem if IDENTIFIER.fullmatch(stem or "") else None
+
+
+def imported_names(text, stem):
+    """{local name: imported name} for named imports from module `stem`, and namespace aliases mapped to ''."""
+    out = {}
+    for match in PY_FROM_IMPORT.finditer(text):
+        if match.group("module").split(".")[-1] == stem:
+            for item in match.group("names").replace("(", " ").replace(")", " ").split(","):
+                parts = item.split()
+                if parts:
+                    out[parts[-1] if len(parts) == 3 and parts[1] == "as" else parts[0]] = parts[0]
+    for match in JS_IMPORT.finditer(text):
+        segments = [s for s in (match.group("source") or match.group("rsource")).split("/") if s]
+        names = [re.sub(r"\.(?:[cm]?[jt]sx?)$", "", s) for s in segments[-2:]]
+        if not names or (names[-1] != stem and not (names[-1] == "index" and names[:-1] == [stem])):
+            continue
+        if match.group("namespace"):
+            out[match.group("namespace")] = ""
+        for item in (match.group("names") or match.group("rnames") or "").split(","):
+            parts = item.replace(":", " as ").split()
+            if parts:
+                out[parts[-1] if len(parts) == 3 and parts[1] == "as" else parts[0]] = parts[0]
+    return out
+
+
+def qualified_wrapper_pattern(text, short_wrappers):
+    """Calls in `text` to short wrapper names through their module, or a regex that never matches."""
+    parts = []
+    for stem, names in short_wrappers.items():
+        if stem not in text:
+            continue
+        alternatives = "|".join(sorted(map(re.escape, names)))
+        parts.append(r"(?<![\w.$])" + re.escape(stem) + r"\s*\.\s*(?:" + alternatives + r")\s*\(")
+        for local, original in imported_names(text, stem).items():
+            if original == "":
+                parts.append(r"(?<![\w.$])" + re.escape(local) + r"\s*\.\s*(?:" + alternatives + r")\s*\(")
+            elif original in names:
+                parts.append(r"(?<![\w.$])" + re.escape(local) + r"\s*\(")
+    return re.compile("|".join(parts)) if parts else None
 
 
 def inside_repo(repo, path):
@@ -1141,6 +1312,7 @@ def scan(repo, include_tests=False, groups=None):
     listed = list_files(repo)
     rels = prefer_real_paths(repo, [rel for rel in listed if scannable(rel, include_tests)])
     hits, texts, spans, wrappers, clients, scanned, fallbacks = {}, {}, {}, set(), set(), 0, 0
+    short_wrappers = {}
 
     def remember(rel, text, found):
         nonlocal fallbacks
@@ -1153,12 +1325,16 @@ def scan(repo, include_tests=False, groups=None):
         scanned += 1
         if scanned % PROGRESS_EVERY == 0:
             print(f"scanned {scanned} of {len(rels)} files", file=sys.stderr, flush=True)
-        if not ANY_SIGNAL.search(text) and not TASK_OUTPUT_ARG.search(text) and not ANCHOR.search(text):
+        if not any_signal(text) and not TASK_OUTPUT_ARG.search(text) and not ANCHOR.search(text):
             continue
         found = line_hits(text)
         if keep_file(found):
             remember(rel, text, normalize_found(found))
-            wrappers |= wrapper_names(spans[rel], found, split_lines(text))
+            names, qualified_only = wrapper_names(spans[rel], found, split_lines(text))
+            wrappers |= names
+            stem = module_stem(rel)
+            if stem and (names or qualified_only):
+                short_wrappers.setdefault(stem, set()).update(names | qualified_only)
             file_kinds = {k for _, ks in found for k in ks}
             if file_kinds & CLIENT_KINDS:
                 clients |= {m.group("name") for m in CLIENT_CLASS.finditer(text)}
@@ -1210,6 +1386,16 @@ def scan(repo, include_tests=False, groups=None):
             found = line_hits(text, combined)
             if keep_file(found):
                 remember(rel, text, normalize_found(found))
+    if short_wrappers:
+        earlier = [r"\b(?:" + "|".join(sorted(map(re.escape, wrappers))) + r")\s*\("] if wrappers else []
+        earlier += [client_use_pattern(clients).pattern] if clients else []
+        for rel, text in read_scannable(repo, rels):
+            qualified = qualified_wrapper_pattern(text, short_wrappers)
+            if qualified is None or not qualified.search(text):
+                continue
+            found = line_hits(text, re.compile("|".join(earlier + [qualified.pattern])))
+            if keep_file(found):
+                remember(rel, text, normalize_found(found))
     areas = assign_areas(list(hits))
     by_area = {}
     functions_total = 0
@@ -1228,7 +1414,8 @@ def scan(repo, include_tests=False, groups=None):
     return {"schema": SCHEMA, "repo": str(repo.resolve()), "head": head, "dirty": dirty, "include_tests": include_tests,
             "python": ".".join(map(str, sys.version_info[:2])), "listed": len(listed), "scanned": scanned,
             "files_with_hits": len(hits), "candidate_functions": functions_total, "python_parse_fallbacks": fallbacks,
-            "wrappers": sorted(wrappers), "suggested_groups": suggested_groups(functions_total), "areas": by_area,
+            "wrappers": sorted(wrappers | {f"{stem}.{name}" for stem, names in short_wrappers.items() for name in names
+                                   if name not in wrappers}), "suggested_groups": suggested_groups(functions_total), "areas": by_area,
             "groups": make_groups(by_area, count)}
 
 

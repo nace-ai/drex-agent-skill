@@ -69,6 +69,30 @@ class RecallEvalTests(unittest.TestCase):
             capture_output=True, text=True,
         )
 
+    def test_baseline_reports_lost_sites_and_candidate_changes(self):
+        before = self.run_recall("--json")
+        self.assertEqual(before.returncode, 0, before.stderr)
+        baseline = self.root / "before.json"
+        baseline.write_text(before.stdout)
+        same = self.run_recall("--baseline", str(baseline))
+        self.assertEqual(same.returncode, 0, same.stderr)
+        self.assertIn("recall 1 -> 1 of 2", same.stdout)
+        self.assertNotIn("lost", same.stdout)
+
+        report = json.loads(before.stdout)
+        report["repos"][0]["missing"] = []
+        report["repos"][0]["candidate_functions"] += 3
+        report["total"]["found"] = 2
+        baseline.write_text(json.dumps(report))
+        worse = self.run_recall("--baseline", str(baseline))
+        self.assertEqual(worse.returncode, 1, worse.stderr)
+        self.assertIn("lost toy decide.py:4 load_rows", worse.stdout)
+        self.assertIn("recall 2 -> 1 of 2", worse.stdout)
+        self.assertIn("(-3)", worse.stdout)
+
+        baseline.write_text("not json")
+        self.assertIn("is not a recall --json report", self.run_recall("--baseline", str(baseline)).stderr)
+
     def test_found_and_missing_counts_and_strict_exit(self):
         result = self.run_recall("--json")
         self.assertEqual(result.returncode, 0, result.stderr)

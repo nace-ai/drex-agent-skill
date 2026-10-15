@@ -57,7 +57,7 @@ def valid_body():
 
 def valid_response():
     return {
-        "model": "drex-served-v2",
+        "model": "drex-test-v1.0",
         "answers": {
             "route": {
                 "type": "choice", "choice": "accept", "confidence": 0.75,
@@ -533,7 +533,7 @@ class RequestValidationTests(OfflineTestCase):
                 oversized = exact + b" " * 50
                 filename.write_bytes(oversized)
                 self.stdin.buffer = io.BytesIO(oversized)
-                with self.assertRaisesRegex(drex.HelperError, "4 MiB"):
+                with self.assertRaisesRegex(drex.HelperError, "16 MiB"):
                     drex.load_body(source)
                 if source == "-":
                     self.assertEqual(self.stdin.buffer.tell(), read_limit + 1)
@@ -693,7 +693,7 @@ class TransportAndCheckTests(OfflineTestCase):
         # The production limit is also pinned; a small patched limit makes
         # boundary testing cheap while checking the exact same code path.
         self.assertEqual(drex.RESPONSE_LIMIT, 8 * 1048576)
-        self.assertEqual(drex.REQUEST_LIMIT, 1048576)
+        self.assertEqual(drex.REQUEST_LIMIT, 4 * 1048576)
         with mock.patch.object(drex, "RESPONSE_LIMIT", 32):
             _, response = self.allow_response(raw=b"0" + b" " * 31)
             self.assertEqual(drex.request(SYNTHETIC_KEY, "/v1/models"), 0)
@@ -764,9 +764,24 @@ class JudgeAndResponseTests(OfflineTestCase):
         self.assertEqual(stdout.count("[REDACTED]"), 4)
         self.assertEqual(json.loads(stdout)["extra_text"], "before-[REDACTED]-after")
 
+    def test_a_different_served_model_is_warned_about_but_still_returned(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        self.allow_response(dict(valid_response(), model="drex-v2.0"))
+        code, stdout, stderr = self.invoke(["judge"], body=valid_body())
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout)["model"], "drex-v2.0")
+        self.assertIn("drex-v2.0 answered, not the requested model", stderr)
+        self.assertNotIn(SYNTHETIC_KEY, stderr)
+
+    def test_the_moving_alias_is_not_warned_about(self):
+        os.environ["DREX_API_KEY"] = SYNTHETIC_KEY
+        self.allow_response(dict(valid_response(), model="drex-v2.0"))
+        code, _stdout, stderr = self.invoke(["judge"], body=dict(valid_body(), model="drex-latest"))
+        self.assertEqual((code, stderr), (0, ""))
+
     def test_valid_response_model_alias_and_numeric_boundaries(self):
         body = valid_body()
-        result = valid_response()
+        result = dict(valid_response(), model="drex-served-v2")
         self.assertNotEqual(result["model"], body["model"])
         self.assertIsNone(drex.validate_response(result, body))
         for value in (0, 1, 0.0, 1.0):

@@ -1,7 +1,7 @@
 """Opt-in real CLI smoke test, with temporary HOME and CLAUDE_CONFIG_DIR.
 
 Run: DREX_TEST_CLAUDE=1 python3 -m unittest discover -s tests -v
-Requires Claude Code 2.1.285+ and sh. Never invokes an LLM or the Drex API.
+Tested with Claude Code 2.1.235. Requires sh. Never invokes an LLM or the Drex API.
 Does not install into the user's normal Claude configuration.
 """
 import json
