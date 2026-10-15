@@ -4,6 +4,8 @@ Get a Drex API key, export it once, then install the plugin or skills for your a
 
 **Supported agents:** [Claude Code](#claude-code) · [OpenCode](#opencode) · [Hermes Agent](#hermes-agent) · [Codex](#codex) · [Cursor](#cursor) · [Gemini CLI](#gemini-cli) · [GitHub Copilot](#github-copilot) · [Windsurf](#windsurf) · [Cline](#cline) · [OpenClaw](#openclaw) · [Pi](#pi) · [DeepSeek Harness](#deepseek-harness) · [Other harness](#other-harness)
 
+https://github.com/user-attachments/assets/772d46e2-7dad-4833-829e-fa92f8ada038
+
 ## Skills
 
 | Skill | Use it to |
