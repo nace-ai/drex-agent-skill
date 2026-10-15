@@ -43,8 +43,8 @@ Measured on this release, on an Apple silicon laptop:
 
 | Measure | Result |
 | --- | --- |
-| Known decision sites on the candidate list, 21 pinned open-source repositories | RECALL_LIST |
-| Known sites in a flagged file | RECALL_FILES |
+| Known decision sites on the candidate list, 21 pinned open-source repositories | 130 of 153 |
+| Known sites in a flagged file | 146 of 153 |
 | Scan time, LangChain (1,782 files scanned) | about 8 seconds |
 | Scan time, Dify (6,329 files scanned) | about 15 seconds |
 
@@ -59,7 +59,7 @@ python3 evals/drexify/recall.py --cache /tmp/drexify-oss
 
 - The unit tests are offline. They never call Drex, a model, or the network, and CI runs them on Python 3.9 to 3.14.
 - `DREX_TEST_CLAUDE=1` installs the plugin into a temporary Claude Code profile and checks that the `make_default` choice reaches the session hook. It needs the `claude` CLI and never calls a model.
-- `recall.py` checks out the pinned repositories in `evals/drexify/known_sites.json`, REPO_SIZE, runs the scan on each, and reports how many known sites are on the candidate list. Add `--strict` to fail when any known site is missing. Save a report with `--json` and pass it to a later run as `--baseline` to list the sites the new scan lost and the change in candidate counts. It exits 1 when a site was lost.
+- `recall.py` checks out the pinned repositories in `evals/drexify/known_sites.json`, about 3.5 GB of shallow clones, runs the scan on each, and reports how many known sites are on the candidate list. Add `--strict` to fail when any known site is missing. Save a report with `--json` and pass it to a later run as `--baseline` to list the sites the new scan lost and the change in candidate counts. It exits 1 when a site was lost.
 - The `Scan recall` workflow runs that comparison against the base branch on every pull request that changes the scanner or the answer key.
 
 Layout:
