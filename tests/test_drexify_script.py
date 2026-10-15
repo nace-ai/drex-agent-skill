@@ -245,6 +245,61 @@ class DrexifyScriptTests(unittest.TestCase):
                      "func (m *Model) GenerateContent(ctx context.Context, mc []Message) error {"):
             self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
 
+    def test_go_csharp_and_php_sdk_calls_are_model_calls(self):
+        for line in ("resp, err := client.Chat.Completions.New(ctx, params)",
+                     "msg, err := client.Messages.New(ctx, anthropic.MessageNewParams{})",
+                     "resp, err := c.CreateChatCompletion(ctx, req)",
+                     "stream, berr := b.client.ChatCompletionStreamRequest(ctx, req)",
+                     "out, err := bot.LLM().ChatCompletionNoStream(ctx, request)",
+                     "var response = await chatClient.CompleteChatAsync(messages, options);",
+                     "var result = await chatCompletion.GetChatCompletionsAsync(agent, dialogs);",
+                     "var reply = await service.GetChatMessageContentAsync(history);",
+                     "$answer = $this->client->chat()->create($args);",
+                     "$text = $this->chat->generateText($prompt);",
+                     "prediction = await self.ai_handler.chat_completion(model=model, system=system)",
+                     "var prob = _model.predict(vector).numpy();",
+                     "$response = $this->classifier->askQuestions($query, $this->questions);",
+                     "$out = $this->llm->generate($prompt);"):
+            self.assertIn("model-call", drexify.line_hits(line)[0][1], line)
+        for line in ("func (b *LLM) ChatCompletionNoStream(ctx context.Context, request llm.CompletionRequest) (string, error) {",
+                     "public async Task<bool> GetChatCompletionsAsync(Agent agent, List<RoleDialogModel> dialogs)",
+                     "type ChatCompletionRequest struct {}"):
+            self.assertNotIn("model-call", (drexify.line_hits(line) or [(0, [])])[0][1], line)
+
+    def test_php_case_insensitive_contains_is_a_text_rule(self):
+        for line in ("if (stripos(mb_strtolower($candidate), mb_strtolower($indicator)) !== false) {",
+                     "if (str_contains(strtolower($text), 'refund')) {"):
+            self.assertIn("text-rule", drexify.line_hits(line)[0][1], line)
+
+    def test_csharp_methods_with_the_brace_on_the_next_line_are_functions(self):
+        text = (
+            "namespace Bots;\n"
+            "public class Router\n"
+            "{\n"
+            "    public Router(IServiceProvider services) : base(services)\n"
+            "    {\n"
+            "    }\n\n"
+            "    public async Task<string> PickAgent(List<RoleDialogModel> dialogs, Func<string, Task> onDone)\n"
+            "    {\n"
+            "        foreach (var d in dialogs)\n"
+            "        {\n"
+            "            Log(d);\n"
+            "        }\n"
+            "        var reply = await chatClient.CompleteChatAsync(messages);\n"
+            "        return reply.Value.Content[0].Text;\n"
+            "    }\n\n"
+            "    private static T Parse<T>(\n"
+            "        string text,\n"
+            "        bool strict)\n"
+            "    {\n"
+            "        return default;\n"
+            "    }\n"
+            "}\n"
+        )
+        spans, _parsed = drexify.file_spans("src/Router.cs", text)
+        self.assertEqual([(s[0], s[1], s[2]) for s in spans],
+                         [(4, 6, "Router"), (8, 16, "PickAgent"), (18, 23, "Parse")])
+
     def test_framework_llm_objects_are_model_calls(self):
         for line in ("response = self.llm.call(prompt)", "out = await llm_instance.ainvoke(messages)",
                      "r = self._llm.call([m])", "await this.llm.chat(messages)", "chat_model.invoke(x)"):
@@ -638,6 +693,20 @@ class DrexifyScriptTests(unittest.TestCase):
         self.assertNotIn("app/services/fetcher.rb", files)
         self.assertNotIn("app/clients/http_client.rb", files)
 
+    def test_scan_marks_callers_of_a_bot_class_beside_a_model_call(self):
+        (self.repo / "lib/agents").mkdir(parents=True)
+        (self.repo / "lib/agents/bot.rb").write_text(
+            "module Agents\n  class Bot\n    def self.as(user, agent:, model:)\n      new(user, agent, model)\n    end\n\n"
+            "    def reply(context)\n      llm.generate(context.prompt)\n    end\n  end\nend\n")
+        (self.repo / "lib/automation").mkdir(parents=True)
+        (self.repo / "lib/automation/triage.rb").write_text(
+            "module Triage\n  def self.handle(post:, search_for_text:)\n"
+            "    bot = Agents::Bot.as(user, agent: agent, model: model)\n"
+            "    result = bot.reply(context)\n    result.downcase.include?(search_for_text)\n  end\nend\n")
+        result = drexify.scan(self.repo)
+        files = {f["path"]: f for a in result["areas"].values() for f in a["files"]}
+        self.assertEqual([fn["name"] for fn in files["lib/automation/triage.rb"]["functions"]], ["handle"])
+
     def test_ruby_methods_end_at_their_own_end_not_at_a_hash_brace(self):
         text = (
             "module Moderation\n"
@@ -992,6 +1061,82 @@ class DrexifyScriptTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             self.assertEqual(drexify.main(["check", str(good), "--repo", str(self.repo)]), 1)
             self.assertEqual(drexify.main(["scan", "--repo", str(self.repo), "--groups", "2"]), 0)
+
+    def test_check_summary_uses_the_singular_for_one_site(self):
+        path = self.report("Identified 1 site of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n"
+                           "- Route (`services/search/app/route.py:1`): candidate.\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(drexify.main(["check", str(path), "--repo", str(self.repo)]), 0)
+        self.assertIn("1 site (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n", out.getvalue())
+
+    def test_check_warns_when_the_coverage_line_has_no_buckets(self):
+        listed = ("Identified 1 site of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n"
+                  "- Route (`services/search/app/route.py:1`): candidate.\n\n")
+        short = drexify.check(self.report(listed + "Coverage: checked 4 of 4 candidate functions.\n"), self.repo)
+        self.assertEqual(short["problems"], [])
+        self.assertTrue(any("no buckets" in w for w in short["warnings"]))
+        full = drexify.check(self.report(
+            listed + "Checked 4 of 4 candidate functions: 1 site, 2 callers, wrappers, or backends, 1 not decision, "
+                     "0 dead. Opened 0 of 0 files without one and looked around the candidates: 0 more sites. "
+                     "1 site line in total.\n"), self.repo)
+        self.assertEqual(full["problems"], [])
+        self.assertFalse(any("no buckets" in w for w in full["warnings"]))
+
+    def test_check_counts_singular_coverage_buckets(self):
+        listed = ("Identified 1 site of drexification (0 already on Drex, 0 partial, 0 implemented now, 1 candidate)\n"
+                  "- Route (`services/search/app/route.py:1`): candidate.\n\n")
+        coverage = ("Checked 3 of 3 candidate functions: 1 site, 1 caller, wrapper, or backend, 1 not a decision, "
+                    "0 dead. Opened 0 of 0 files without one and looked around the candidates: 0 more sites. "
+                    "1 site line in total.\n")
+        result = drexify.check(self.report(listed + coverage), self.repo)
+        self.assertEqual(result["problems"], [])
+        self.assertFalse(any("no buckets" in w for w in result["warnings"]))
+        wrong = drexify.check(self.report(listed + coverage.replace("Checked 3 of 3", "Checked 4 of 4")), self.repo)
+        self.assertIn("coverage buckets sum to 3, not the 4 candidate functions checked", wrong["problems"])
+
+    def test_scan_out_writes_the_listing_and_prints_its_first_line(self):
+        saved, listing = Path(self.tmp.name) / "map.json", Path(self.tmp.name) / "group.txt"
+        with redirect_stdout(io.StringIO()):
+            drexify.main(["scan", "--repo", str(self.repo), "--groups", "1", "--save", str(saved)])
+        whole = io.StringIO()
+        with redirect_stdout(whole):
+            drexify.main(["scan", "--from", str(saved), "--group", "1"])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(drexify.main(["scan", "--from", str(saved), "--group", "1", "--out", str(listing)]), 0)
+        self.assertEqual(listing.read_text(), whole.getvalue())
+        first = whole.getvalue().split("\n", 1)[0]
+        self.assertEqual(out.getvalue(), f"{first}\nwrote {whole.getvalue().count(chr(10))} lines to {listing}\n")
+
+    def test_rerank_word_in_accessors_and_short_bodies_is_not_a_candidate(self):
+        text = (
+            "public class RerankRequest {\n"
+            "    public String query() {\n"
+            "        return query;\n"
+            "    }\n\n"
+            "    public String toString() {\n"
+            "        return \"RerankRequest{query=\" + query\n"
+            "            + \", model=\" + model\n"
+            "            + \", documents=\" + documents\n"
+            "            + \"}\";\n"
+            "    }\n\n"
+            "    public String settings() {\n"
+            "        return \"rerank top 5\";\n"
+            "    }\n\n"
+            "    public List<Content> topChunks(List<Content> contents, Query query) {\n"
+            "        return reranker.rerank(contents, query.text());\n"
+            "    }\n"
+            "}\n"
+        )
+        spans, _ = drexify.file_spans("RerankRequest.java", text)
+        got = [fn["name"] for fn in drexify.candidate_functions(spans, drexify.line_hits(text), text.splitlines())]
+        self.assertEqual([short.rsplit(".", 1)[-1] for short in got], ["topChunks"])
+
+    def test_end_to_end_test_folders_are_skipped(self):
+        for rel in ("e2e/setup/fake-server.js", "e2e-tests/template/agent.ts", "tui/E2E/backend.ts"):
+            self.assertFalse(drexify.scannable(rel, False), rel)
+            self.assertTrue(drexify.scannable(rel, True), rel)
 
     def test_migration_folders_are_skipped_even_with_include_tests(self):
         skipped = (

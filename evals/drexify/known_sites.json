@@ -837,6 +837,110 @@
           "function": "moderateText"
         }
       ]
+    },
+    {
+      "name": "mattermost-plugin-agents",
+      "url": "https://github.com/mattermost/mattermost-plugin-agents.git",
+      "commit": "d14bf00c80cf48bb0e8bd88b675ef859e9e7e6b5",
+      "language": "go",
+      "sites": [
+        {
+          "path": "react/react.go",
+          "line": 33,
+          "function": "Resolve"
+        },
+        {
+          "path": "evals/graders.go",
+          "line": 32,
+          "function": "LLMRubric"
+        }
+      ]
+    },
+    {
+      "name": "BotSharp",
+      "url": "https://github.com/SciSharp/BotSharp.git",
+      "commit": "94d02308bc4ce2d91374efe1b283e228b65408d4",
+      "language": "csharp",
+      "sites": [
+        {
+          "path": "src/Infrastructure/BotSharp.Core.Rules/Criteria/Llm/LlmCriteriaEvaluator.cs",
+          "line": 33,
+          "function": "EvaluateAsync"
+        },
+        {
+          "path": "src/Infrastructure/BotSharp.Core/Files/Services/Instruct/FileInstructService.SelectFile.cs",
+          "line": 78,
+          "function": "SelectFiles"
+        },
+        {
+          "path": "src/Plugins/BotSharp.Plugin.RoutingSpeeder/Providers/IntentClassifier.cs",
+          "line": 256,
+          "function": "Predict"
+        },
+        {
+          "path": "src/Plugins/BotSharp.Plugin.AgentTesting/Services/LlmAgentTestJudge.cs",
+          "line": 38,
+          "function": "JudgeAsync"
+        },
+        {
+          "path": "src/Infrastructure/BotSharp.Core/Evaluations/Services/EvaluatingService.Evaluate.cs",
+          "line": 115,
+          "function": "EvaluateMetrics"
+        }
+      ]
+    },
+    {
+      "name": "LLPhant",
+      "url": "https://github.com/LLPhant/LLPhant.git",
+      "commit": "8fba3bcd9df5e9e440d7724baf7c47c4441fe52f",
+      "language": "php",
+      "sites": [
+        {
+          "path": "src/Query/SemanticSearch/ClassifierPromptInjectionQueryTransformer.php",
+          "line": 32,
+          "function": "transformQuery"
+        },
+        {
+          "path": "src/Query/SemanticSearch/LakeraPromptInjectionQueryTransformer.php",
+          "line": 41,
+          "function": "transformQuery"
+        },
+        {
+          "path": "src/Query/SemanticSearch/Experimental/LangkitPromptInjectionQueryTransformer.php",
+          "line": 65,
+          "function": "transformQuery"
+        },
+        {
+          "path": "src/Query/SemanticSearch/LLMReranker.php",
+          "line": 37,
+          "function": "transformDocuments"
+        },
+        {
+          "path": "src/Evaluation/Criteria/CriteriaEvaluator.php",
+          "line": 36,
+          "function": "evaluateText"
+        },
+        {
+          "path": "src/Evaluation/Criteria/CriteriaEvaluator.php",
+          "line": 64,
+          "function": "evaluateMessages"
+        },
+        {
+          "path": "src/Evaluation/Output/NoFallbackAnswerEvaluator.php",
+          "line": 24,
+          "function": "evaluateText"
+        },
+        {
+          "path": "src/Evaluation/Trajectory/TrajectoryEvaluator.php",
+          "line": 347,
+          "function": "evaluateHarmlessness"
+        },
+        {
+          "path": "src/Tool/SerpApiSearch.php",
+          "line": 97,
+          "function": "searchAndGetPageContent"
+        }
+      ]
     }
   ]
 }
